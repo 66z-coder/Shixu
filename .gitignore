@@ -1,69 +1,60 @@
-# Prerequisites
-*.d
+# =========================
+# CMake build
+# =========================
+build/
+cmake-build-*/
+out/
 
-# Compiled Object files
-*.slo
-*.lo
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# =========================
+# Compiled files
+# =========================
 *.o
 *.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
+*.exe
+*.dll
 *.so
 *.dylib
-*.dll
-*.so.*
-
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
 *.a
 *.lib
 
-# Executables
-*.exe
-*.out
-*.app
+# =========================
+# Qt generated files
+# =========================
+moc_*
+ui_*
+qrc_*
+*.pro.user
+*.pro.user.*
 
-# Build directories
-build/
-Build/
-build-*/
+# =========================
+# IDE
+# =========================
+.vscode/
+.idea/
+.vs/
 
-# CMake generated files
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-Makefile
-install_manifest.txt
-compile_commands.json
+# =========================
+# Windows
+# =========================
+Thumbs.db
+Desktop.ini
 
+# =========================
+# macOS
+# =========================
+.DS_Store
+
+# =========================
 # Temporary files
+# =========================
 *.tmp
+*.temp
 *.log
 *.bak
-*.swp
-
-# vcpkg
-vcpkg_installed/
-
-# debug information files
-*.dwo
-
-# test output & cache
-Testing/
-.cache/
+*~
