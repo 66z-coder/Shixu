@@ -22,6 +22,7 @@ find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
 # 当前程序入口
 add_executable(Shixu
     src/main.cpp
+    src/recommendation/RecommendationEngine.cpp
 )
 
 # 公共头文件目录
@@ -32,6 +33,22 @@ target_include_directories(Shixu
 
 # 链接 Qt Widgets
 target_link_libraries(Shixu
+    PRIVATE
+        Qt${QT_VERSION_MAJOR}::Widgets
+)
+
+# 独立演示 D 推荐模块的模拟结果，不替换主程序入口。
+add_executable(RecommendationDemo
+    src/recommendation/demo_main.cpp
+    src/recommendation/RecommendationEngine.cpp
+)
+
+target_include_directories(RecommendationDemo
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(RecommendationDemo
     PRIVATE
         Qt${QT_VERSION_MAJOR}::Widgets
 )
