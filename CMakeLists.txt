@@ -16,12 +16,15 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
 # 同时兼容 Qt6 和 Qt5
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Sql)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Sql)
 
 # 当前程序入口
 add_executable(Shixu
     src/main.cpp
+    src/inventory/inventory.cpp
+    src/inventory/inventory.h
+    include/model/FoodCandidate.h
 )
 
 # 公共头文件目录
@@ -31,7 +34,26 @@ target_include_directories(Shixu
 )
 
 # 链接 Qt Widgets
-target_link_libraries(Shixu
-    PRIVATE
-        Qt${QT_VERSION_MAJOR}::Widgets
+target_link_libraries(Shixu PRIVATE
+    Qt${QT_VERSION_MAJOR}::Widgets
+    Qt${QT_VERSION_MAJOR}::Sql
+)
+
+
+# 独立测试程序：仅用于验证 B 模块，不影响正式程序 Shixu
+add_executable(TestInventory
+    test_inventory.cpp
+    src/inventory/inventory.cpp
+    src/inventory/inventory.h
+    include/model/FoodCandidate.h
+)
+
+target_include_directories(TestInventory PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/inventory
+)
+
+target_link_libraries(TestInventory PRIVATE
+    Qt${QT_VERSION_MAJOR}::Widgets
+    Qt${QT_VERSION_MAJOR}::Sql
 )
