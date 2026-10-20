@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "MealRecordStorage.h"
 #include "RecipeData.h"
 #include "RecipeRepository.h"
 
@@ -173,14 +174,65 @@ MatchResult calculateMatch(const Recipe& recipe,
     return result;
 }
 
-NutritionInfo calculateNutrition(const Recipe& /*recipe*/, int /*servings*/)
+NutritionInfo calculateNutrition(const Recipe& recipe, int servings)
 {
-    NutritionInfo info;
-    // stub：仅返回默认值。阶段三实现。
-    return info;
+    NutritionInfo total;
+
+    // 异常份数字段统一处理：servings <= 0 视为非法，返回零营养值。
+    // 理由：不能为负数（负营养没有物理意义），0 份也不需要任何营养。
+    if (servings <= 0) {
+        return total;
+    }
+
+    double totalCalories = 0.0;
+    double totalProtein = 0.0;
+    double totalCarbs = 0.0;
+    double totalFat = 0.0;
+
+    for (const RecipeIngredient& ingredient : recipe.ingredients) {
+        // 负数/零重量跳过，不能贡献负营养。
+        if (ingredient.amountGrams <= 0.0) {
+            continue;
+        }
+        // 每种食材每 100 克营养 × 份量比例 = 该食材对"1 份菜谱"的贡献。
+        const double ratio = ingredient.amountGrams / 100.0;
+        totalCalories  += ratio * ingredient.nutritionPer100g.calories;
+        totalProtein   += ratio * ingredient.nutritionPer100g.protein;
+        totalCarbs     += ratio * ingredient.nutritionPer100g.carbohydrates;
+        totalFat       += ratio * ingredient.nutritionPer100g.fat;
+    }
+
+    total.calories      = totalCalories  * static_cast<double>(servings);
+    total.protein       = totalProtein   * static_cast<double>(servings);
+    total.carbohydrates = totalCarbs     * static_cast<double>(servings);
+    total.fat           = totalFat       * static_cast<double>(servings);
+
+    return total;
 }
 
-void recordMeal(const Recipe& /*recipe*/, int /*servings*/, const std::string& /*time*/)
+void recordMeal(const Recipe& recipe, int servings, const std::string& time)
 {
-    // stub：阶段三实现（需要持久化 MealRecord）。
+    // servings <= 0：非法份数，不记录、不写入存储。
+    // 避免零份/负份产生零营养或负营养的脏数据。
+    if (servings <= 0) {
+        return;
+    }
+
+    MealRecord record;
+    record.recipeId = recipe.id;
+    record.recipeName = recipe.name;
+    record.servings = servings;
+    record.time = time;
+    // 存储层从 time 提取 YYYY-MM-DD 日期。这里也显式记录一份，
+    // 方便后续读取时直接复用，不用再做字符串处理。
+    if (time.size() >= 10) {
+        record.date = time.substr(0, 10);
+    }
+    // 复用 calculateNutrition：计算本次用餐的总营养。
+    record.nutrition = calculateNutrition(recipe, servings);
+
+    MealRecordStorage::append(record);
+    // 返回 void，无法向上层传递成功/失败。
+    // 写入失败的详细原因存储在 MealRecordStorage::getLastError()，
+    // 上层（如 E 模块）在需要时可查询。
 }

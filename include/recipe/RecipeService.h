@@ -31,13 +31,23 @@ MatchResult calculateMatch(
     const std::vector<FoodBatch>& inventory
 );
 
-// 【后续阶段实现】计算指定份数的菜谱营养信息。
+// 计算指定份数的菜谱营养信息。
+// 约定：RecipeIngredient.amountGrams 表示一人份的食材重量；
+//       calculateNutrition(recipe, servings) = 一人份营养 × servings。
+//       servings <= 0 视为非法，返回零营养值；
+//       amountGrams <= 0 的食材不参与计算（避免负营养）。
+// 每 100 克营养数据取自 ingredient.nutritionPer100g。
 NutritionInfo calculateNutrition(
     const Recipe& recipe,
     int servings
 );
 
-// 【后续阶段实现】记录一条用餐信息，供后续饮食统计使用。
+// 记录一条用餐信息，供后续饮食统计使用。
+// 内部复用 calculateNutrition 计算本次用餐总营养，
+// 并通过 MealRecordStorage 追加写入本地文本文件（管道分隔）。
+// time 格式约定为 YYYY-MM-DD HH:mm:ss（前 10 字符作为日期查询键）。
+// servings <= 0 视为非法，不产生记录。
+// 返回 void：写入失败可通过 MealRecordStorage::getLastError() 诊断。
 void recordMeal(
     const Recipe& recipe,
     int servings,

@@ -30,6 +30,7 @@ endif()
 set(SHIXU_RECIPE_SOURCES
     src/recipe/RecipeRepository.cpp
     src/recipe/RecipeData.cpp
+    src/recipe/MealRecordStorage.cpp
     src/recipe/RecipeService.cpp
 )
 
@@ -77,4 +78,31 @@ add_executable(CalculateMatchDemo
 target_include_directories(CalculateMatchDemo
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# ---------------------------------------------------------------------------
+# C 模块阶段三独立验证程序：calculateNutrition。
+# ---------------------------------------------------------------------------
+add_executable(CalculateNutritionDemo
+    tests/recipe/test_calculateNutrition.cpp
+    ${SHIXU_RECIPE_SOURCES}
+)
+
+target_include_directories(CalculateNutritionDemo
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+# ---------------------------------------------------------------------------
+# C 模块阶段四独立验证程序：recordMeal + 持久化。
+# ---------------------------------------------------------------------------
+add_executable(RecordMealDemo
+    tests/recipe/test_recordMeal.cpp
+    ${SHIXU_RECIPE_SOURCES}
+)
+
+target_include_directories(RecordMealDemo
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/recipe
 )
