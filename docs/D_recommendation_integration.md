@@ -26,7 +26,7 @@ preferences.topK = 5;
 preferences.servings = 1;
 preferences.maxPreparationMinutes = 30;
 preferences.excludedIngredients = {QStringLiteral("花生")};
-preferences.preferredTags = {QStringLiteral("清淡")};
+preferences.mood = Mood::Neutral; // E 收集用户选择；状态一般对应 30 分钟
 
 auto built = readUserContext(inventory, preferences);
 auto results = recommend(built.context);
@@ -49,14 +49,16 @@ for (const auto& item : results) {
 - 无效 `QDate` 表示未知，仍可作为库存使用，但没有临期加分。
 - `calculateMatch` 以菜谱用量乘 `servings` 后计算；营养也由 C 按 `servings` 计算。
 - 候选允许部分匹配，必须同时向用户展示 `missingIngredients`，不能声称这些菜都可立即制作。
-- 初始权重：数量满足 35%、临期利用 25%、偏好 20%、能量目标匹配 15%、时间 5%。未提供偏好、能量目标或有效用时的可选因素不参加评分，参与的权重重新归一化。权重仍可由团队调整。
+- 心情时间规则：有心情做饭 60 分钟、状态一般 30 分钟、疲惫想省事 15 分钟；与正数的用户自设时间上限取较短值。未选心情时不生成推荐，未知或非正制作时间的菜谱暂不推荐。
+- 权重保持五项独立：数量满足 35%、临期利用 25%、心情匹配 20%、能量目标匹配 15%、制作时间 5%。偏好标签替换为心情，不合并心情和时间权重。心情控制可接受的制作时间范围，符合上限的候选获得心情匹配分 100；制作时间项单独评价快慢。没有有效能量目标时，该因素不参加评分，其余权重重新归一化。
+- `maxPreparationMinutes <= 0` 只表示不额外限制，不能取消心情上限。心情枚举、展示辅助函数和 E 的迁移步骤见 `D_mood_interface.md`。
 - 能量目标由用户通过 `targetCaloriesPerServing` 提供；默认 0 不评分。该分项只表示与输入目标的接近程度，不是健康评价。C 内置营养数据为课程估算值。
 - 忌口目前按食材名称精确匹配（去首尾空白、忽略大小写）；食材别名与过敏原分类需要团队另行定义。
 
 ## 两个运行目标
 
 - `RecommendationDemo`：固定示例库存 + C 的真实菜谱模块，方便快速检查 D 算法。
-- `RecommendationLiveDemo`：输入食材 → B 保存 SQLite → 重新读取库存 → C 查询/匹配/营养 → D 推荐。首次库存为空。可输入番茄 300 g、鸡蛋 200 g、食用油 50 g，然后修改份数、时间、忌口、标签查看结果。
+- `RecommendationLiveDemo`：输入食材 → B 保存 SQLite → 重新读取库存 → C 查询/匹配/营养 → D 推荐。首次库存为空。可输入番茄 300 g、鸡蛋 200 g、食用油 50 g，先选择今天的心情，再修改份数、自设时间上限和忌口查看结果。
 
 联调窗口把数据库放在用户本地应用数据目录下的 `Shixu/RecommendationLiveDemo/shixu.db`（以窗口底部显示的绝对路径为准）。它是独立联调库存，不会自动读取 A/E 窗口使用的数据库。正式运行时 E 需统一 B 的数据库工作目录；B 当前接口将数据库名称固定为相对路径 `shixu.db`。
 
@@ -88,6 +90,6 @@ CTest 登记 C 的四个现有验证程序，以及 D 的 `RecommendationTests` 
 ## 后续需团队确认
 
 1. B/C 最终公共库存类型仍待统一。D 当前适配现有 `FoodCandidate` 和 C 的临时 `FoodBatch`，不将它们视为同一个类型。
-2. E 需确定主窗口中偏好输入、刷新时机、缺料提示和解释展示，并调用上述推荐入口。
+2. E 需在推荐前收集心情，并更新结果中的心情时间说明；参见 `D_mood_interface.md`。缺料提示、刷新时机和整体流程仍需 E 联调。
 3. B 当前 `addFood` 返回 `void`、读取失败与空库存都可能返回空列表，D 无法完整诊断库存错误；联调窗口对保存操作通过重新读取数量检查。统一错误处理需 B/E 另行约定。
 4. 当前只完成本地接入与验证，GitHub PR 的合并由团队决定。

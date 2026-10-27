@@ -49,10 +49,12 @@ int main(int argc, char* argv[])
     try {
         check(temporary.isValid() && QDir::setCurrent(temporary.path()), "Test database must be isolated from the user's data");
         const QDate today(2026, 10, 27);
+        UserContext selectedMood;
+        selectedMood.mood = Mood::Neutral;
         {
             InventoryManager inventory;
             check(inventory.getAllItems().isEmpty(), "New B SQLite inventory must be empty");
-            check(recommend(readUserContext(inventory, {}, today).context).empty(), "Empty B inventory must yield no candidates");
+            check(recommend(readUserContext(inventory, selectedMood, today).context).empty(), "Empty B inventory must yield no candidates");
             inventory.addFood(food(QStringLiteral("番茄"), 0.3, QStringLiteral("kg"), today.addDays(1)));
             inventory.addFood(food(QStringLiteral("鸡蛋"), 200, QStringLiteral("g")));
             inventory.addFood(food(QStringLiteral("食用油"), 50000, QStringLiteral("mg"), today.addDays(10)));
@@ -62,7 +64,7 @@ int main(int argc, char* argv[])
             check(inventory.getExpiredItems(today).size() == 1, "B's expired query must identify the old batch");
             check(inventory.getExpiringItems(today, 3).size() == 1, "B's expiring query must agree with adapter boundaries");
 
-            const auto built = readUserContext(inventory, {}, today);
+            const auto built = readUserContext(inventory, selectedMood, today);
             check(built.usableBatches == 3 && built.expiredBatches == 1 && built.unconvertedBatches == 1,
                   "Adapter must distinguish usable, expired and unconvertible batches");
             check(std::abs(gramsOf(built.context, "番茄") - 300.0) < 0.001, "kg must convert to grams");
@@ -79,7 +81,7 @@ int main(int argc, char* argv[])
             }
             check(matched, "Actual B SQLite -> FoodBatch -> C matching/nutrition -> D must return the expected dish");
 
-            const auto converted = readUserContext(inventory, {}, today, 3,
+            const auto converted = readUserContext(inventory, selectedMood, today, 3,
                 {{QStringLiteral("米饭"), QStringLiteral("个"), 15.0}});
             check(converted.unconvertedBatches == 0 && gramsOf(converted.context, "米饭") == 105.0,
                   "An explicit measured food/unit conversion should enable the count unit");
@@ -111,10 +113,15 @@ int main(int argc, char* argv[])
         UserContext preferences;
         preferences.topK = 2;
         preferences.servings = 3;
+        preferences.mood = Mood::Tired;
+        preferences.maxPreparationMinutes = 20;
         preferences.excludedIngredients = {QStringLiteral("花生")};
         const auto kept = buildUserContext(dates, preferences, today);
         check(kept.context.topK == 2 && kept.context.servings == 3
               && kept.context.excludedIngredients == preferences.excludedIngredients, "E's settings must survive inventory conversion");
+
+        check(kept.context.mood == Mood::Tired && effectivePreparationTimeLimit(kept.context) == 15,
+              "B snapshot conversion must preserve E's selected mood and stricter mood cap");
 
         QDir::setCurrent(oldDirectory);
         std::cout << "Inventory/C/D integration checks passed: " << checks << '\n';

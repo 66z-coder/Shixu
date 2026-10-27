@@ -4,6 +4,7 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDateEdit>
 #include <QDir>
 #include <QDoubleSpinBox>
@@ -24,7 +25,7 @@
 using namespace Shixu::RecommendationEngine;
 
 namespace {
-QStringList parseTags(QString text)
+QStringList parseIngredientNames(QString text)
 {
     text.replace(QStringLiteral("，"), QStringLiteral(","));
     QStringList values;
@@ -107,21 +108,29 @@ int main(int argc, char* argv[])
     servings->setRange(1, 20);
     auto* minutes = new QSpinBox;
     minutes->setRange(0, 240);
-    minutes->setValue(60);
-    minutes->setSpecialValueText(QStringLiteral("不限时间"));
+    minutes->setValue(0);
+    minutes->setSpecialValueText(QStringLiteral("只使用心情对应的上限"));
     auto* excluded = new QLineEdit;
     excluded->setPlaceholderText(QStringLiteral("例如：花生，虾"));
-    auto* preferred = new QLineEdit;
-    preferred->setPlaceholderText(QStringLiteral("例如：家常，清淡"));
+    auto* mood = new QComboBox;
+    mood->addItem(QStringLiteral("请选择今天的心情"), static_cast<int>(Mood::NotSelected));
+    for (const Mood choice : {Mood::ReadyToCook, Mood::Neutral, Mood::Tired}) {
+        mood->addItem(QStringLiteral("%1（最多 %2 分钟）")
+                          .arg(moodDisplayName(choice)).arg(moodTimeLimitMinutes(choice)),
+                      static_cast<int>(choice));
+    }
+    auto* timeLimitNote = new QLabel(QStringLiteral("先选择心情，再生成推荐。"));
+    timeLimitNote->setWordWrap(true);
     auto* calories = new QDoubleSpinBox;
     calories->setRange(0.0, 10000.0);
     calories->setSpecialValueText(QStringLiteral("未设置，不参与此项评分"));
     auto* refresh = new QPushButton(QStringLiteral("读取库存并重新推荐"));
+    settingsForm->addRow(QStringLiteral("今天心情怎么样"), mood);
     settingsForm->addRow(QStringLiteral("最多推荐几道"), k);
     settingsForm->addRow(QStringLiteral("份数"), servings);
-    settingsForm->addRow(QStringLiteral("最长制作分钟"), minutes);
+    settingsForm->addRow(QStringLiteral("自己设置的分钟上限"), minutes);
+    settingsForm->addRow(timeLimitNote);
     settingsForm->addRow(QStringLiteral("忌口（逗号分隔）"), excluded);
-    settingsForm->addRow(QStringLiteral("偏好标签"), preferred);
     settingsForm->addRow(QStringLiteral("每份能量目标 kcal"), calories);
     settingsForm->addRow(refresh);
     controls->addWidget(settingsBox);
@@ -148,8 +157,13 @@ int main(int argc, char* argv[])
         preferences.topK = k->value();
         preferences.servings = servings->value();
         preferences.maxPreparationMinutes = minutes->value();
-        preferences.excludedIngredients = parseTags(excluded->text());
-        preferences.preferredTags = parseTags(preferred->text());
+        preferences.excludedIngredients = parseIngredientNames(excluded->text());
+        preferences.mood = static_cast<Mood>(mood->currentData().toInt());
+        const int timeLimit = effectivePreparationTimeLimit(preferences);
+        timeLimitNote->setText(timeLimit > 0
+            ? QStringLiteral("心情与自设上限共同筛选：最多 %1 分钟；制作快慢另按 %2 分钟基准评分。")
+                  .arg(timeLimit).arg(minutes->value() > 0 ? minutes->value() : DefaultTimeScoringReferenceMinutes)
+            : QStringLiteral("先选择心情，再生成推荐。"));
         preferences.targetCaloriesPerServing = calories->value();
         const auto built = readUserContext(inventory, preferences);
         QStringList statusLines{QStringLiteral("可用批次 %1；已过期排除 %2；单位待换算 %3。")
@@ -164,11 +178,19 @@ int main(int argc, char* argv[])
                                                             : QStringLiteral("未知"));
         }
         stock->setPlainText(stockLines.join(QLatin1Char('\n')));
+        if (timeLimit <= 0) {
+            output->setPlainText(QStringLiteral("今天心情怎么样？\n请先在上方选择心情，然后生成推荐。"));
+            return;
+        }
         output->setPlainText(recommendationText(recommend(built.context)));
     };
     QObject::connect(unknownExpiry, &QCheckBox::toggled, expiry,
                      [expiry](bool checked) { expiry->setEnabled(!checked); });
     QObject::connect(refresh, &QPushButton::clicked, &window, update);
+    QObject::connect(mood, QOverload<int>::of(&QComboBox::currentIndexChanged), &window,
+                     [&](int) { update(); });
+    QObject::connect(minutes, QOverload<int>::of(&QSpinBox::valueChanged), &window,
+                     [&](int) { update(); });
     QObject::connect(add, &QPushButton::clicked, &window, [&] {
         if (name->text().trimmed().isEmpty() || unit->text().trimmed().isEmpty()) {
             QMessageBox::information(&window, QStringLiteral("请补充输入"), QStringLiteral("请填写食材名称和单位。"));

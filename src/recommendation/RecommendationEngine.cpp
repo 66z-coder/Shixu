@@ -56,8 +56,10 @@ bool isFilteredOut(const Recipe& recipe, const UserContext& context)
     if (context.servings <= 0 || recipe.id <= 0 || fromUtf8(recipe.name).trimmed().isEmpty()) {
         return true;
     }
-    if (context.maxPreparationMinutes > 0
-        && recipe.cookingTimeMinutes > context.maxPreparationMinutes) {
+    const int timeLimit = effectivePreparationTimeLimit(context);
+    // Unknown/invalid durations cannot be confirmed to fit the mood limit.
+    if (timeLimit <= 0 || recipe.cookingTimeMinutes <= 0
+        || recipe.cookingTimeMinutes > timeLimit) {
         return true;
     }
     bool hasIngredient = false;
@@ -101,6 +103,36 @@ struct WorstAtTop {
 
 } // namespace
 
+QString moodDisplayName(Mood mood)
+{
+    switch (mood) {
+    case Mood::ReadyToCook: return QStringLiteral("有心情做饭");
+    case Mood::Neutral: return QStringLiteral("状态一般");
+    case Mood::Tired: return QStringLiteral("疲惫、想省事");
+    default: return QStringLiteral("尚未选择心情");
+    }
+}
+
+int moodTimeLimitMinutes(Mood mood)
+{
+    switch (mood) {
+    case Mood::ReadyToCook: return 60;
+    case Mood::Neutral: return 30;
+    case Mood::Tired: return 15;
+    default: return 0;
+    }
+}
+
+int effectivePreparationTimeLimit(const UserContext& context)
+{
+    const int moodLimit = moodTimeLimitMinutes(context.mood);
+    if (moodLimit <= 0) {
+        return 0;
+    }
+    return context.maxPreparationMinutes > 0
+        ? std::min(moodLimit, context.maxPreparationMinutes) : moodLimit;
+}
+
 Recommendation generateRecommendation(const Recipe& recipe, const UserContext& context)
 {
     if (isFilteredOut(recipe, context)) {
@@ -140,23 +172,6 @@ Recommendation generateRecommendation(const Recipe& recipe, const UserContext& c
     result.expiryUrgencyScore = requiredNames.empty() ? 0.0
         : 100.0 * expiring / static_cast<double>(requiredNames.size());
 
-    std::set<QString> preferences;
-    for (const QString& tag : context.preferredTags) {
-        if (!tag.trimmed().isEmpty()) {
-            preferences.insert(normalized(tag));
-        }
-    }
-    int preferred = 0;
-    for (const QString& tag : preferences) {
-        if (std::any_of(recipe.tags.cbegin(), recipe.tags.cend(), [&](const std::string& item) {
-                return normalized(fromUtf8(item)) == tag;
-            })) {
-            ++preferred;
-        }
-    }
-    result.preferenceMatchScore = preferences.empty() ? 0.0
-        : 100.0 * preferred / static_cast<double>(preferences.size());
-
     result.nutrition = calculateNutrition(recipe, context.servings);
     const bool nutritionValid = validNutrition(result.nutrition);
     if (!nutritionValid) {
@@ -172,28 +187,26 @@ Recommendation generateRecommendation(const Recipe& recipe, const UserContext& c
                               / context.targetCaloriesPerServing), 0.0, 100.0);
     }
 
-    const bool timeScored = context.maxPreparationMinutes > 0 && recipe.cookingTimeMinutes > 0;
-    if (timeScored) {
-        result.preparationTimeScore = std::clamp(
-            100.0 * (1.0 - static_cast<double>(recipe.cookingTimeMinutes)
-                              / context.maxPreparationMinutes), 0.0, 100.0);
-    }
+    result.mood = context.mood;
+    result.effectiveMaxPreparationMinutes = effectivePreparationTimeLimit(context);
+    // Mood controls which durations are acceptable. Every surviving candidate
+    // meets that requirement; it is not a second copy of the speed score.
+    result.moodMatchScore = 100.0;
+    result.preparationTimeReferenceMinutes = context.maxPreparationMinutes > 0
+        ? context.maxPreparationMinutes : DefaultTimeScoringReferenceMinutes;
+    result.preparationTimeScore = std::clamp(
+        100.0 * (1.0 - static_cast<double>(recipe.cookingTimeMinutes)
+                          / result.preparationTimeReferenceMinutes), 0.0, 100.0);
 
-    // Draft weights. Missing optional preferences/energy target/time are omitted
-    // and the active weights are normalized; a missing value is never fabricated.
-    double weight = 0.35 + 0.25;
-    double weighted = 0.35 * result.ingredientMatchScore + 0.25 * result.expiryUrgencyScore;
-    if (!preferences.empty()) {
-        weight += 0.20;
-        weighted += 0.20 * result.preferenceMatchScore;
-    }
+    // Keep the former preference slot as mood (20%) and speed as time (5%).
+    // Nutrition without a user target is omitted and remaining weights normalize.
+    double weight = 0.35 + 0.25 + 0.20 + 0.05;
+    double weighted = 0.35 * result.ingredientMatchScore
+        + 0.25 * result.expiryUrgencyScore + 0.20 * result.moodMatchScore
+        + 0.05 * result.preparationTimeScore;
     if (result.nutritionScoreAvailable) {
         weight += 0.15;
         weighted += 0.15 * result.nutritionScore;
-    }
-    if (timeScored) {
-        weight += 0.05;
-        weighted += 0.05 * result.preparationTimeScore;
     }
     result.totalScore = std::clamp(weighted / weight, 0.0, 100.0);
     return result;
@@ -202,7 +215,7 @@ Recommendation generateRecommendation(const Recipe& recipe, const UserContext& c
 std::vector<Recommendation> getTopKRecommendations(
     const std::vector<Recipe>& candidates, const UserContext& context, int k)
 {
-    if (k <= 0 || context.servings <= 0) {
+    if (k <= 0 || context.servings <= 0 || effectivePreparationTimeLimit(context) <= 0) {
         return {};
     }
     std::priority_queue<Recommendation, std::vector<Recommendation>, WorstAtTop> top;
@@ -234,7 +247,7 @@ std::vector<Recommendation> getTopKRecommendations(
 
 std::vector<Recommendation> recommend(const UserContext& context)
 {
-    if (context.topK <= 0 || context.servings <= 0) {
+    if (context.topK <= 0 || context.servings <= 0 || effectivePreparationTimeLimit(context) <= 0) {
         return {};
     }
     const auto inventory = usableInventory(context.inventory);
@@ -251,9 +264,12 @@ ExplainResult explainRecommendation(const Recommendation& recommendation)
     result.totalScore = recommendation.totalScore;
     result.ingredientMatchScore = recommendation.ingredientMatchScore;
     result.expiryUrgencyScore = recommendation.expiryUrgencyScore;
-    result.preferenceMatchScore = recommendation.preferenceMatchScore;
+    result.moodMatchScore = recommendation.moodMatchScore;
+    result.mood = recommendation.mood;
+    result.effectiveMaxPreparationMinutes = recommendation.effectiveMaxPreparationMinutes;
     result.nutritionScore = recommendation.nutritionScore;
     result.preparationTimeScore = recommendation.preparationTimeScore;
+    result.preparationTimeReferenceMinutes = recommendation.preparationTimeReferenceMinutes;
     result.nutritionScoreAvailable = recommendation.nutritionScoreAvailable;
     result.missingIngredients = recommendation.missingIngredients;
     if (recommendation.recipeId <= 0) {
@@ -265,16 +281,21 @@ ExplainResult explainRecommendation(const Recommendation& recommendation)
     if (result.expiryUrgencyScore > 0.0) {
         result.reasons.append(QStringLiteral("可利用临近到期的库存食材"));
     }
-    if (result.preferenceMatchScore > 0.0) {
-        result.reasons.append(QStringLiteral("包含你偏好的菜谱标签"));
+    result.reasons.append(QStringLiteral("心情匹配：符合“%1”对应的 %2 分钟制作上限")
+                              .arg(moodDisplayName(result.mood)).arg(moodTimeLimitMinutes(result.mood)));
+    if (result.effectiveMaxPreparationMinutes < moodTimeLimitMinutes(result.mood)) {
+        result.reasons.append(QStringLiteral("结合你设置的更短上限，本次最多制作 %1 分钟")
+                                  .arg(result.effectiveMaxPreparationMinutes));
     }
     if (result.nutritionScoreAvailable) {
         result.reasons.append(QStringLiteral("能量目标匹配分：%1（使用 C 模块的估算营养数据）")
                                   .arg(result.nutritionScore, 0, 'f', 1));
     }
     if (recommendation.recipe.cookingTimeMinutes > 0) {
-        result.reasons.append(QStringLiteral("预计制作时间：%1 分钟")
-                                  .arg(recommendation.recipe.cookingTimeMinutes));
+        result.reasons.append(QStringLiteral("预计制作时间：%1 分钟；独立时间得分 %2（按 %3 分钟基准评价快慢）")
+                                  .arg(recommendation.recipe.cookingTimeMinutes)
+                                  .arg(result.preparationTimeScore, 0, 'f', 1)
+                                  .arg(result.preparationTimeReferenceMinutes));
     }
     return result;
 }
@@ -286,7 +307,7 @@ UserContext makeDemoUserContext()
                          {"", "食用油", 50.0}, {"", "胡萝卜", 200.0}};
     context.expiringIngredients = {QStringLiteral("番茄")};
     context.excludedIngredients = {QStringLiteral("花生")};
-    context.preferredTags = {QStringLiteral("家常"), QStringLiteral("清淡")};
+    context.mood = Mood::Neutral;
     context.maxPreparationMinutes = 40;
     context.topK = 3;
     return context;
