@@ -26,6 +26,7 @@ int main(int argc, char* argv[])
                 if (food.name.trimmed().isEmpty()) {
                     QMessageBox::warning(
                         &window, "错误", "食材名称不能为空");
+                    window.completeSubmission(false, "测试校验失败，未入库。");
                     return;
                 }
 
@@ -33,6 +34,7 @@ int main(int argc, char* argv[])
                 if (food.quantity <= 0) {
                     QMessageBox::warning(
                         &window, "错误", "食材数量必须大于0");
+                    window.completeSubmission(false, "测试校验失败，未入库。");
                     return;
                 }
 
@@ -40,6 +42,7 @@ int main(int argc, char* argv[])
                 if (food.unit.trimmed().isEmpty()) {
                     QMessageBox::warning(
                         &window, "错误", "食材单位不能为空");
+                    window.completeSubmission(false, "测试校验失败，未入库。");
                     return;
                 }
 
@@ -63,6 +66,8 @@ int main(int argc, char* argv[])
                                 ? QString(" | 总重量：%1 g").arg(food.totalWeightGrams, 0, 'f', 1)
                                 : QStringLiteral(" | 总重量：未知"));
             }
+
+            window.completeSubmission(true, "测试模式：已接收数据，未保存到库存。");
 
             // 6. 显示最终收到的数据
             QMessageBox::information(

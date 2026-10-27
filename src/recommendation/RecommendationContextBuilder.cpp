@@ -25,6 +25,7 @@ double gramsPerUnit(const FoodCandidate& food, const QList<FoodUnitConversion>& 
     if (unit == QStringLiteral("mg") || unit == QStringLiteral("毫克")) {
         return 0.001;
     }
+    if (unit == QStringLiteral("斤")) return 500.0;
     for (const FoodUnitConversion& conversion : conversions) {
         if (normalized(conversion.foodName) == normalized(food.name)
             && normalized(conversion.unit) == unit
@@ -61,8 +62,9 @@ ContextBuildResult buildUserContext(
             continue;
         }
         const double factor = gramsPerUnit(food, conversions);
-        const double grams = food.quantity * factor;
-        if (factor <= 0.0 || !std::isfinite(grams) || grams <= 0.0) {
+        const double grams = std::isfinite(food.totalWeightGrams) && food.totalWeightGrams > 0.0
+            ? food.totalWeightGrams : food.quantity * factor;
+        if (!std::isfinite(grams) || grams <= 0.0) {
             ++result.unconvertedBatches;
             result.warnings.append(QStringLiteral("%1：单位“%2”无法换算为克，暂不参与数量匹配；请提供克数或实测换算。")
                                        .arg(name, food.unit));

@@ -33,7 +33,7 @@ int main(int argc,char** argv){
  auto parse=[&]{for(auto* b:w.findChildren<QPushButton*>())if(b->text()=="解析日期信息")b->click();};
  check(!w.findChild<QComboBox*>("countingConvention"),"counting option removed");
  int submissions=0;std::vector<FoodCandidate> received;
- QObject::connect(&w,&PackagingEntryWidget::foodsConfirmed,[&](const std::vector<FoodCandidate>& f){++submissions;received=f;});
+ QObject::connect(&w,&PackagingEntryWidget::foodsConfirmed,[&](const std::vector<FoodCandidate>& f){++submissions;received=f;w.completeSubmission(true);});
  name->setText("西红柿");unit->setCurrentText("公斤");
  raw->setPlainText("有效期至：2027-01-01");parse();
  check(!save->isEnabled(),"confirmation required");
