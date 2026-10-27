@@ -2,6 +2,7 @@
 
 #include "reward/RewardSystem.h"
 
+#include <QButtonGroup>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -240,6 +241,57 @@ HomeWidget::HomeWidget(RewardSystem* rewards, QWidget* parent)
     sideLayout->setSpacing(10);
     sideScroll->setWidget(side);
 
+    QVBoxLayout* moodLayout;
+    sideLayout->addWidget(card(side, QStringLiteral("今天的心情"), moodLayout));
+    auto* moodDescription = new QLabel(
+        QStringLiteral("选一个状态，看看今天适合做什么。"), side);
+    moodDescription->setObjectName(QStringLiteral("homeBody"));
+    moodDescription->setWordWrap(true);
+    moodLayout->addWidget(moodDescription);
+
+    m_moodButtons = new QButtonGroup(this);
+    m_moodButtons->setExclusive(true);
+    const struct { Shixu::RecommendationEngine::Mood mood; const char* label; int minutes; } moods[] = {
+        {Shixu::RecommendationEngine::Mood::ReadyToCook, "有心情做饭", 60},
+        {Shixu::RecommendationEngine::Mood::Neutral, "状态一般", 30},
+        {Shixu::RecommendationEngine::Mood::Tired, "疲惫、想省事", 15},
+    };
+    for (const auto& choice : moods) {
+        auto* button = new QPushButton(
+            QStringLiteral("%1　·　最多 %2 分钟")
+                .arg(QString::fromUtf8(choice.label))
+                .arg(choice.minutes), side);
+        button->setObjectName(QStringLiteral("homeMoodChoice"));
+        button->setCheckable(true);
+        button->setCursor(Qt::PointingHandCursor);
+        button->setMinimumHeight(38);
+        m_moodButtons->addButton(button, static_cast<int>(choice.mood));
+        moodLayout->addWidget(button);
+        connect(button, &QPushButton::clicked, this, [this, choice] {
+            m_moodHint->hide();
+            emit moodSelected(choice.mood);
+        });
+    }
+
+    m_moodHint = new QLabel(QStringLiteral("先选一个心情吧。"), side);
+    m_moodHint->setObjectName(QStringLiteral("homeMoodHint"));
+    m_moodHint->hide();
+    moodLayout->addWidget(m_moodHint);
+    auto* moodAction = new QPushButton(QStringLiteral("看看今天吃什么  →"), side);
+    moodAction->setObjectName(QStringLiteral("homeMoodAction"));
+    moodAction->setCursor(Qt::PointingHandCursor);
+    moodAction->setMinimumHeight(42);
+    moodLayout->addWidget(moodAction);
+    connect(moodAction, &QPushButton::clicked, this, [this] {
+        const int selected = m_moodButtons->checkedId();
+        if (selected < 0) {
+            m_moodHint->show();
+            return;
+        }
+        emit moodRecommendationRequested(
+            static_cast<Shixu::RecommendationEngine::Mood>(selected));
+    });
+
     QVBoxLayout* inventoryLayout;
     sideLayout->addWidget(card(side, QStringLiteral("冰箱概览"), inventoryLayout));
     m_inventoryCount = new QLabel(side);
@@ -309,6 +361,22 @@ HomeWidget::HomeWidget(RewardSystem* rewards, QWidget* parent)
         QLabel#homeBody { color: #6C8493; font-size: 12px; }
         QFrame#homeFoodTile { background: #F5FAFB; border: 1px solid #E4EFF0; border-radius: 11px; }
         QLabel#homeFoodName { color: #294F66; font-size: 11px; font-weight: 700; }
+        QPushButton#homeMoodChoice {
+            color: #31566D; background: #F0F7FA; text-align: left;
+            border: 1px solid #D6E7EF; border-radius: 9px;
+            padding: 7px 12px; font-size: 13px;
+        }
+        QPushButton#homeMoodChoice:hover { background: #E8F3F8; }
+        QPushButton#homeMoodChoice:checked {
+            color: #185D88; background: #DCEEF8;
+            border: 2px solid #62A9D3; font-weight: 700;
+        }
+        QLabel#homeMoodHint { color: #C05239; font-size: 12px; }
+        QPushButton#homeMoodAction {
+            color: white; background: #358FCA; border: 0;
+            border-radius: 9px; font-size: 13px; font-weight: 700;
+        }
+        QPushButton#homeMoodAction:hover { background: #267DB6; }
         QPushButton#homeLink { color: #3684BA; background: transparent; border: 0; text-align: left; padding: 4px 0; font-weight: 600; }
         QPushButton#homeLink:hover { color: #174E83; }
         QPushButton#homeAction { color: #FFFFFF; background: #3C9AD9; border: 0; border-radius: 12px; padding: 11px; font-weight: 700; }
@@ -319,6 +387,14 @@ HomeWidget::HomeWidget(RewardSystem* rewards, QWidget* parent)
     refresh();
 }
 
+void HomeWidget::selectMood(Shixu::RecommendationEngine::Mood mood)
+{
+    if (QPushButton* button = qobject_cast<QPushButton*>(
+            m_moodButtons->button(static_cast<int>(mood)))) {
+        button->setChecked(true);
+        m_moodHint->hide();
+    }
+}
 void HomeWidget::paintEvent(QPaintEvent* event)
 {
     QPainter painter(this);

@@ -163,6 +163,15 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_home, &HomeWidget::checkInRequested, this, [this] { showPage(Page::CheckIn); });
     auto* recommendations = new RecommendationWidget(m_pages);
     setPage(Page::Recommendations, recommendations);
+    connect(m_home, &HomeWidget::moodSelected,
+            recommendations, &RecommendationWidget::selectMood);
+    connect(recommendations, &RecommendationWidget::moodSelected,
+            m_home, &HomeWidget::selectMood);    connect(m_home, &HomeWidget::moodRecommendationRequested, this,
+            [this, recommendations](Shixu::RecommendationEngine::Mood mood) {
+        recommendations->selectMood(mood);
+        showPage(Page::Recommendations);
+        recommendations->requestRecommendations();
+    });
     connect(recommendations, &RecommendationWidget::recommendationRequested, this,
             [this, recommendations](Shixu::RecommendationEngine::Mood mood,
                                     int maxPreparationMinutes) {

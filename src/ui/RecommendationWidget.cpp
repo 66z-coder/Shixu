@@ -176,8 +176,9 @@ RecommendationWidget::RecommendationWidget(QWidget* parent)
         button->setCursor(Qt::PointingHandCursor);
         m_moodButtons->addButton(button, static_cast<int>(choice.mood));
         moodRow->addWidget(button, 1);
-        connect(button, &QPushButton::clicked, this, [this] {
+        connect(button, &QPushButton::clicked, this, [this, choice] {
             m_selectionHint->hide();
+            emit moodSelected(choice.mood);
         });
     }
     controlsLayout->addLayout(moodRow);
@@ -208,15 +209,7 @@ RecommendationWidget::RecommendationWidget(QWidget* parent)
     generateButton->setCursor(Qt::PointingHandCursor);
     generateButton->setMinimumHeight(42);
     controlsLayout->addWidget(generateButton);
-    connect(generateButton, &QPushButton::clicked, this, [this] {
-        const int selected = m_moodButtons->checkedId();
-        if (selected < 0) {
-            m_selectionHint->show();
-            return;
-        }
-        m_selectionHint->hide();
-        emit recommendationRequested(static_cast<Mood>(selected), m_customLimit->value());
-    });
+    connect(generateButton, &QPushButton::clicked, this, &RecommendationWidget::requestRecommendations);
     bodyLayout->addWidget(controls);
 
     m_warning = makeLabel({}, QStringLiteral("recommendationWarnings"), body);
@@ -298,6 +291,27 @@ RecommendationWidget::RecommendationWidget(QWidget* parent)
         }
         QProgressBar#scoreBar::chunk { background: #63A9D2; border-radius: 4px; }
     )"));
+}
+
+void RecommendationWidget::selectMood(Shixu::RecommendationEngine::Mood mood)
+{
+    if (QPushButton* button = qobject_cast<QPushButton*>(
+            m_moodButtons->button(static_cast<int>(mood)))) {
+        button->setChecked(true);
+        m_customLimit->setValue(0);
+        m_selectionHint->hide();
+    }
+}
+
+void RecommendationWidget::requestRecommendations()
+{
+    const int selected = m_moodButtons->checkedId();
+    if (selected < 0) {
+        m_selectionHint->show();
+        return;
+    }
+    m_selectionHint->hide();
+    emit recommendationRequested(static_cast<Mood>(selected), m_customLimit->value());
 }
 
 void RecommendationWidget::setWarnings(const QStringList& warnings)

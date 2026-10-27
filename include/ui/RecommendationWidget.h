@@ -40,8 +40,11 @@ public:
 
     void setWarnings(const QStringList& warnings);
     void setRecommendations(const QVector<RecommendationViewItem>& items);
+    void selectMood(Shixu::RecommendationEngine::Mood mood);
+    void requestRecommendations();
 
 signals:
+    void moodSelected(Shixu::RecommendationEngine::Mood mood);
     void recommendationRequested(Shixu::RecommendationEngine::Mood mood,
                                  int maxPreparationMinutes);
 
