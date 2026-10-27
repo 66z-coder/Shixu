@@ -57,7 +57,26 @@ if(QT_FOUND)
     target_include_directories(ShixuRecommendation PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(ShixuRecommendation PUBLIC ShixuRecipe Qt${QT_VERSION_MAJOR}::Core)
 
-    add_executable(Shixu src/main.cpp)
+    # Retain E's application pages, reward system and resources.
+    add_executable(Shixu
+        src/main.cpp
+        include/ui/MainWindow.h
+        src/ui/MainWindow.cpp
+        include/reward/RewardSystem.h
+        src/reward/RewardSystem.cpp
+        include/ui/CheckInWidget.h
+        src/ui/CheckInWidget.cpp
+        include/ui/StatisticsWidget.h
+        src/ui/StatisticsWidget.cpp
+        include/ui/RecommendationWidget.h
+        src/ui/RecommendationWidget.cpp
+        include/ui/HomeWidget.h
+        src/ui/HomeWidget.cpp
+        resources/home.qrc
+        include/ui/InventoryWidget.h
+        src/ui/InventoryWidget.cpp
+    )
+    target_include_directories(Shixu PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_libraries(Shixu PRIVATE ShixuRecommendation ShixuRecognition Qt${QT_VERSION_MAJOR}::Widgets)
 
     add_executable(RecommendationDemo src/recommendation/demo_main.cpp)
@@ -86,6 +105,53 @@ if(QT_FOUND)
         target_include_directories(ShixuInventory PUBLIC
             "${SHIXU_INVENTORY_ROOT}/include" "${SHIXU_INVENTORY_ROOT}/src/inventory")
         target_link_libraries(ShixuInventory PUBLIC Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Sql)
+
+        target_link_libraries(Shixu PRIVATE ShixuInventory)
+
+        # B 模块：库存管理独立测试
+        add_executable(TestInventory
+            test_inventory.cpp
+            src/inventory/inventory.cpp
+            src/inventory/inventory.h
+            include/model/FoodCandidate.h
+        )
+
+        target_include_directories(TestInventory PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/inventory
+        )
+
+        target_link_libraries(TestInventory PRIVATE
+            Qt${QT_VERSION_MAJOR}::Widgets
+            Qt${QT_VERSION_MAJOR}::Sql
+        )
+
+        if(BUILD_TESTING)
+            add_executable(RewardSystemTest
+                tests/reward/RewardSystemTest.cpp
+                include/reward/RewardSystem.h
+                src/reward/RewardSystem.cpp
+            )
+            target_include_directories(RewardSystemTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+            target_link_libraries(RewardSystemTest PRIVATE Qt${QT_VERSION_MAJOR}::Core)
+            add_test(NAME RewardSystemTest COMMAND RewardSystemTest)
+
+            add_executable(InventoryIntegrationTest
+                tests/inventory/InventoryIntegrationTest.cpp
+                src/inventory/inventory.cpp
+                src/inventory/inventory.h
+                include/model/FoodCandidate.h
+            )
+            target_include_directories(InventoryIntegrationTest PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/include
+                ${CMAKE_CURRENT_SOURCE_DIR}/src
+            )
+            target_link_libraries(InventoryIntegrationTest PRIVATE
+                Qt${QT_VERSION_MAJOR}::Core
+                Qt${QT_VERSION_MAJOR}::Sql
+            )
+            add_test(NAME InventoryIntegrationTest COMMAND InventoryIntegrationTest)
+        endif()
 
         add_library(ShixuRecommendationInventory STATIC src/recommendation/RecommendationContextBuilder.cpp)
         target_link_libraries(ShixuRecommendationInventory PUBLIC ShixuRecommendation ShixuInventory)
