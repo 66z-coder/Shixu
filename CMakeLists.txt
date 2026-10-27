@@ -1,119 +1,88 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(Shixu
-    VERSION 0.1.0
-    LANGUAGES CXX
-)
-
-# 使用 C++17
+project(Shixu VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+include(CTest)
 
-# ---------------------------------------------------------------------------
-# Qt 配置：可选。主 Shixu 目标和 D 模块的演示需要 Qt Widgets；
-# C 模块的 RecipeDemo 完全不依赖 Qt，可以在没有 Qt 的机器上单独构建。
-# ---------------------------------------------------------------------------
-set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTOUIC ON)
-set(CMAKE_AUTORCC ON)
-
-find_package(QT NAMES Qt6 Qt5 OPTIONAL_COMPONENTS Widgets)
-if(QT_FOUND)
-    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
-    message(STATUS "Shixu: 检测到 Qt ${QT_VERSION}")
-else()
-    message(WARNING "Shixu: 未检测到 Qt Widgets。主程序 Shixu 和 RecommendationDemo 将被跳过；C 模块的 RecipeDemo 仍可构建。")
-endif()
-
-# C 模块源码（无 Qt 依赖，主程序和测试目标共用）。
-set(SHIXU_RECIPE_SOURCES
+# C remains buildable without Qt.
+add_library(ShixuRecipe STATIC
     src/recipe/RecipeRepository.cpp
     src/recipe/RecipeData.cpp
     src/recipe/MealRecordStorage.cpp
     src/recipe/RecipeService.cpp
 )
+target_include_directories(ShixuRecipe PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-# ---------------------------------------------------------------------------
-# 主程序入口：仅在 Qt 可用时构建。
-# ---------------------------------------------------------------------------
-if(QT_FOUND)
-    add_executable(Shixu
-        src/main.cpp
-        src/recommendation/RecommendationEngine.cpp
-        ${SHIXU_RECIPE_SOURCES}
-    )
-
-    target_include_directories(Shixu
-        PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/include
-    )
-
-    target_link_libraries(Shixu
-        PRIVATE
-            Qt${QT_VERSION_MAJOR}::Widgets
-    )
+if(BUILD_TESTING)
+    foreach(pair IN ITEMS "RecipeDemo|test_findRecipesByFoods" "CalculateMatchDemo|test_calculateMatch"
+                          "CalculateNutritionDemo|test_calculateNutrition" "RecordMealDemo|test_recordMeal")
+        string(REPLACE "|" ";" parts "${pair}")
+        list(GET parts 0 target_name)
+        list(GET parts 1 test_source)
+        add_executable(${target_name} tests/recipe/${test_source}.cpp)
+        target_include_directories(${target_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/recipe)
+        target_link_libraries(${target_name} PRIVATE ShixuRecipe)
+        add_test(NAME ${target_name} COMMAND ${target_name})
+    endforeach()
 endif()
 
-# ---------------------------------------------------------------------------
-# C 模块独立演示程序：不依赖 Qt，直接验证 findRecipesByFoods。
-# ---------------------------------------------------------------------------
-add_executable(RecipeDemo
-    tests/recipe/test_findRecipesByFoods.cpp
-    ${SHIXU_RECIPE_SOURCES}
-)
-
-target_include_directories(RecipeDemo
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-# ---------------------------------------------------------------------------
-# C 模块阶段二独立验证程序：calculateMatch。
-# ---------------------------------------------------------------------------
-add_executable(CalculateMatchDemo
-    tests/recipe/test_calculateMatch.cpp
-    ${SHIXU_RECIPE_SOURCES}
-)
-
-target_include_directories(CalculateMatchDemo
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-# ---------------------------------------------------------------------------
-# C 模块阶段三独立验证程序：calculateNutrition。
-# ---------------------------------------------------------------------------
-add_executable(CalculateNutritionDemo
-    tests/recipe/test_calculateNutrition.cpp
-    ${SHIXU_RECIPE_SOURCES}
-)
-
-target_include_directories(CalculateNutritionDemo
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-# ---------------------------------------------------------------------------
-# C 模块阶段四独立验证程序：recordMeal + 持久化。
-# ---------------------------------------------------------------------------
-add_executable(RecordMealDemo
-    tests/recipe/test_recordMeal.cpp
-    ${SHIXU_RECIPE_SOURCES}
-)
-
-target_include_directories(RecordMealDemo
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/recipe
-)
-
-
+find_package(QT NAMES Qt6 Qt5 QUIET COMPONENTS Widgets)
 if(QT_FOUND)
-    add_executable(RecommendationDemo
-        src/recommendation/demo_main.cpp
-        src/recommendation/RecommendationEngine.cpp
-    )
-    target_include_directories(RecommendationDemo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-    target_link_libraries(RecommendationDemo PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
+    set(CMAKE_AUTOMOC ON)
+    set(CMAKE_AUTOUIC ON)
+    set(CMAKE_AUTORCC ON)
+
+    add_library(ShixuRecommendation STATIC src/recommendation/RecommendationEngine.cpp)
+    target_include_directories(ShixuRecommendation PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(ShixuRecommendation PUBLIC ShixuRecipe Qt${QT_VERSION_MAJOR}::Core)
+
+    add_executable(Shixu src/main.cpp)
+    target_link_libraries(Shixu PRIVATE ShixuRecommendation Qt${QT_VERSION_MAJOR}::Widgets)
+
+    add_executable(RecommendationDemo src/recommendation/demo_main.cpp)
+    target_link_libraries(RecommendationDemo PRIVATE ShixuRecommendation Qt${QT_VERSION_MAJOR}::Widgets)
+
+    if(BUILD_TESTING)
+        add_executable(RecommendationTests tests/recommend/test_recommendation.cpp)
+        target_link_libraries(RecommendationTests PRIVATE ShixuRecommendation)
+        add_test(NAME RecommendationTests COMMAND RecommendationTests)
+    endif()
+
+    # Prefer B in the shared tree once merged. Until then, a caller may supply
+    # B's checkout. The local ignored snapshot is only a development fallback.
+    set(SHIXU_INVENTORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" CACHE PATH "B inventory module checkout")
+    if(NOT EXISTS "${SHIXU_INVENTORY_ROOT}/src/inventory/inventory.cpp"
+       AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build/dependencies/inventory/src/inventory/inventory.cpp")
+        set(SHIXU_INVENTORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/build/dependencies/inventory")
+    endif()
+    find_package(Qt${QT_VERSION_MAJOR} QUIET COMPONENTS Sql)
+    if(TARGET Qt${QT_VERSION_MAJOR}::Sql
+       AND EXISTS "${SHIXU_INVENTORY_ROOT}/src/inventory/inventory.cpp"
+       AND EXISTS "${SHIXU_INVENTORY_ROOT}/src/inventory/inventory.h"
+       AND EXISTS "${SHIXU_INVENTORY_ROOT}/include/model/FoodCandidate.h")
+        message(STATUS "B inventory source: ${SHIXU_INVENTORY_ROOT}")
+        add_library(ShixuInventory STATIC "${SHIXU_INVENTORY_ROOT}/src/inventory/inventory.cpp")
+        target_include_directories(ShixuInventory PUBLIC
+            "${SHIXU_INVENTORY_ROOT}/include" "${SHIXU_INVENTORY_ROOT}/src/inventory")
+        target_link_libraries(ShixuInventory PUBLIC Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Sql)
+
+        add_library(ShixuRecommendationInventory STATIC src/recommendation/RecommendationContextBuilder.cpp)
+        target_link_libraries(ShixuRecommendationInventory PUBLIC ShixuRecommendation ShixuInventory)
+
+        add_executable(RecommendationLiveDemo src/recommendation/live_demo_main.cpp)
+        target_link_libraries(RecommendationLiveDemo PRIVATE ShixuRecommendationInventory Qt${QT_VERSION_MAJOR}::Widgets)
+
+        if(BUILD_TESTING)
+            add_executable(RecommendationIntegrationTests tests/recommend/test_inventory_integration.cpp)
+            target_link_libraries(RecommendationIntegrationTests PRIVATE ShixuRecommendationInventory)
+            add_test(NAME RecommendationIntegrationTests COMMAND RecommendationIntegrationTests)
+        endif()
+    else()
+        message(STATUS "B inventory or Qt Sql unavailable: live integration targets are skipped. Set SHIXU_INVENTORY_ROOT to B's checkout; see docs/D_recommendation_integration.md.")
+    endif()
+else()
+    message(STATUS "Qt Widgets unavailable: only the C recipe library and tests are enabled.")
 endif()

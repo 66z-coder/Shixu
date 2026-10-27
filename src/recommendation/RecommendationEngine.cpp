@@ -3,156 +3,245 @@
 #include <algorithm>
 #include <cmath>
 #include <queue>
+#include <set>
 #include <utility>
+
+#include "recipe/RecipeService.h"
 
 namespace Shixu::RecommendationEngine {
 namespace {
 
-QString normalized(const QString& value)
+QString fromUtf8(const std::string& text)
 {
-    return value.trimmed().toCaseFolded();
+    return QString::fromUtf8(text.data(), static_cast<int>(text.size()));
 }
 
-bool containsText(const QStringList& values, const QString& target)
+QString normalized(const QString& text)
 {
-    const QString key = normalized(target);
+    return text.trimmed().toCaseFolded();
+}
+
+bool containsText(const QStringList& values, const QString& text)
+{
     return std::any_of(values.cbegin(), values.cend(), [&](const QString& value) {
-        return normalized(value) == key;
+        return normalized(value) == normalized(text);
     });
 }
 
-double ratioScore(int matches, int total)
+std::vector<FoodBatch> usableInventory(const std::vector<FoodBatch>& inventory)
 {
-    if (total <= 0) {
-        return 0.0;
+    std::vector<FoodBatch> usable;
+    for (const FoodBatch& food : inventory) {
+        if (!fromUtf8(food.foodName).trimmed().isEmpty()
+            && std::isfinite(food.amount) && food.amount > 0.0) {
+            usable.push_back(food);
+        }
     }
-    return 100.0 * static_cast<double>(matches) / static_cast<double>(total);
+    return usable;
 }
 
-bool isFilteredOut(const RecipeCandidate& candidate, const UserContext& context)
+QStringList toNames(const std::vector<std::string>& names)
 {
-    if (candidate.name.trimmed().isEmpty()) {
-        return true;
+    QStringList result;
+    for (const std::string& name : names) {
+        result.append(fromUtf8(name));
     }
-    if (context.maxPreparationMinutes > 0 && candidate.preparationMinutes > 0
-        && candidate.preparationMinutes > context.maxPreparationMinutes) {
-        return true;
-    }
-    return std::any_of(candidate.ingredients.cbegin(), candidate.ingredients.cend(),
-                       [&](const QString& ingredient) {
-        return containsText(context.excludedIngredients, ingredient);
-    });
+    result.removeDuplicates();
+    result.sort();
+    return result;
 }
 
-// The priority queue keeps the currently lowest-ranked retained item at top,
-// so a better item can replace it in O(log k).
-struct LowerScoreAtTop {
+bool isFilteredOut(const Recipe& recipe, const UserContext& context)
+{
+    if (context.servings <= 0 || recipe.id <= 0 || fromUtf8(recipe.name).trimmed().isEmpty()) {
+        return true;
+    }
+    if (context.maxPreparationMinutes > 0
+        && recipe.cookingTimeMinutes > context.maxPreparationMinutes) {
+        return true;
+    }
+    bool hasIngredient = false;
+    for (const RecipeIngredient& ingredient : recipe.ingredients) {
+        if (!std::isfinite(ingredient.amountGrams)) {
+            return true;
+        }
+        if (ingredient.amountGrams > 0.0) {
+            hasIngredient = true;
+            if (containsText(context.excludedIngredients, fromUtf8(ingredient.foodName))) {
+                return true;
+            }
+        }
+    }
+    return !hasIngredient;
+}
+
+bool validNutrition(const NutritionInfo& nutrition)
+{
+    return std::isfinite(nutrition.calories) && nutrition.calories >= 0.0
+        && std::isfinite(nutrition.protein) && nutrition.protein >= 0.0
+        && std::isfinite(nutrition.carbohydrates) && nutrition.carbohydrates >= 0.0
+        && std::isfinite(nutrition.fat) && nutrition.fat >= 0.0;
+}
+
+bool better(const Recommendation& left, const Recommendation& right)
+{
+    if (left.totalScore != right.totalScore) {
+        return left.totalScore > right.totalScore;
+    }
+    return left.recipeId < right.recipeId;
+}
+
+// Using 'better' as the heap comparator leaves the worst retained result at top.
+struct WorstAtTop {
     bool operator()(const Recommendation& left, const Recommendation& right) const
     {
-        if (left.totalScore != right.totalScore) {
-            return left.totalScore > right.totalScore;
-        }
-        return left.dishName < right.dishName;
+        return better(left, right);
     }
 };
 
 } // namespace
 
-Recommendation generateRecommendation(const RecipeCandidate& candidate,
-                                      const UserContext& context)
+Recommendation generateRecommendation(const Recipe& recipe, const UserContext& context)
 {
+    if (isFilteredOut(recipe, context)) {
+        return {};
+    }
+
+    Recipe demand = recipe;
+    for (RecipeIngredient& ingredient : demand.ingredients) {
+        ingredient.amountGrams *= context.servings;
+        if (!std::isfinite(ingredient.amountGrams)) {
+            return {};
+        }
+    }
+
+    const MatchResult match = calculateMatch(demand, usableInventory(context.inventory));
     Recommendation result;
-    result.recipeId = candidate.id;
-    result.dishName = candidate.name.trimmed();
+    result.recipeId = recipe.id;
+    result.dishName = fromUtf8(recipe.name);
+    result.recipe = recipe;
+    result.servings = context.servings;
+    result.availableIngredients = toNames(match.availableIngredients);
+    result.missingIngredients = toNames(match.missingIngredients);
+    result.ingredientMatchScore = std::clamp(match.matchRate, 0.0, 100.0);
 
-    int availableMatches = 0;
-    int expiringMatches = 0;
-    for (const QString& ingredient : candidate.ingredients) {
-        if (containsText(context.availableIngredients, ingredient)) {
-            ++availableMatches;
-        }
-        if (containsText(context.expiringIngredients, ingredient)) {
-            ++expiringMatches;
-        }
-    }
-
-    int preferredMatches = 0;
-    for (const QString& tag : candidate.tags) {
-        if (containsText(context.preferredTags, tag)) {
-            ++preferredMatches;
+    std::set<QString> requiredNames;
+    for (const RecipeIngredient& ingredient : recipe.ingredients) {
+        if (ingredient.amountGrams > 0.0) {
+            requiredNames.insert(normalized(fromUtf8(ingredient.foodName)));
         }
     }
+    int expiring = 0;
+    for (const QString& name : requiredNames) {
+        if (containsText(context.expiringIngredients, name)) {
+            ++expiring;
+        }
+    }
+    result.expiryUrgencyScore = requiredNames.empty() ? 0.0
+        : 100.0 * expiring / static_cast<double>(requiredNames.size());
 
-    result.ingredientMatchScore = ratioScore(availableMatches, candidate.ingredients.size());
-    result.expiryUrgencyScore = ratioScore(expiringMatches, candidate.ingredients.size());
-    result.preferenceMatchScore = ratioScore(preferredMatches, candidate.tags.size());
-    result.nutritionScore = std::isfinite(candidate.nutritionScore)
-        ? std::clamp(candidate.nutritionScore, 0.0, 100.0)
-        : 0.0;
+    std::set<QString> preferences;
+    for (const QString& tag : context.preferredTags) {
+        if (!tag.trimmed().isEmpty()) {
+            preferences.insert(normalized(tag));
+        }
+    }
+    int preferred = 0;
+    for (const QString& tag : preferences) {
+        if (std::any_of(recipe.tags.cbegin(), recipe.tags.cend(), [&](const std::string& item) {
+                return normalized(fromUtf8(item)) == tag;
+            })) {
+            ++preferred;
+        }
+    }
+    result.preferenceMatchScore = preferences.empty() ? 0.0
+        : 100.0 * preferred / static_cast<double>(preferences.size());
 
-    if (context.maxPreparationMinutes > 0 && candidate.preparationMinutes > 0) {
-        const double timeRatio = static_cast<double>(candidate.preparationMinutes)
-            / static_cast<double>(context.maxPreparationMinutes);
-        result.preparationTimeScore = std::clamp(100.0 * (1.0 - timeRatio), 0.0, 100.0);
-    } else {
-        result.preparationTimeScore = 50.0;
+    result.nutrition = calculateNutrition(recipe, context.servings);
+    const bool nutritionValid = validNutrition(result.nutrition);
+    if (!nutritionValid) {
+        result.nutrition = {};
+    }
+    result.nutritionScoreAvailable = nutritionValid && result.nutrition.calories > 0.0
+        && std::isfinite(context.targetCaloriesPerServing)
+        && context.targetCaloriesPerServing > 0.0;
+    if (result.nutritionScoreAvailable) {
+        const double perServing = result.nutrition.calories / context.servings;
+        result.nutritionScore = std::clamp(
+            100.0 * (1.0 - std::abs(perServing - context.targetCaloriesPerServing)
+                              / context.targetCaloriesPerServing), 0.0, 100.0);
     }
 
-    // Initial tunable weights: pantry match 35%, expiry 25%, preferences 20%,
-    // nutrition 15%, and preparation time 5%.
-    result.totalScore = 0.35 * result.ingredientMatchScore
-        + 0.25 * result.expiryUrgencyScore
-        + 0.20 * result.preferenceMatchScore
-        + 0.15 * result.nutritionScore
-        + 0.05 * result.preparationTimeScore;
+    const bool timeScored = context.maxPreparationMinutes > 0 && recipe.cookingTimeMinutes > 0;
+    if (timeScored) {
+        result.preparationTimeScore = std::clamp(
+            100.0 * (1.0 - static_cast<double>(recipe.cookingTimeMinutes)
+                              / context.maxPreparationMinutes), 0.0, 100.0);
+    }
+
+    // Draft weights. Missing optional preferences/energy target/time are omitted
+    // and the active weights are normalized; a missing value is never fabricated.
+    double weight = 0.35 + 0.25;
+    double weighted = 0.35 * result.ingredientMatchScore + 0.25 * result.expiryUrgencyScore;
+    if (!preferences.empty()) {
+        weight += 0.20;
+        weighted += 0.20 * result.preferenceMatchScore;
+    }
+    if (result.nutritionScoreAvailable) {
+        weight += 0.15;
+        weighted += 0.15 * result.nutritionScore;
+    }
+    if (timeScored) {
+        weight += 0.05;
+        weighted += 0.05 * result.preparationTimeScore;
+    }
+    result.totalScore = std::clamp(weighted / weight, 0.0, 100.0);
     return result;
 }
 
 std::vector<Recommendation> getTopKRecommendations(
-    const std::vector<RecipeCandidate>& candidates,
-    const UserContext& context,
-    int k)
+    const std::vector<Recipe>& candidates, const UserContext& context, int k)
 {
-    if (k <= 0) {
+    if (k <= 0 || context.servings <= 0) {
         return {};
     }
-
-    std::priority_queue<Recommendation, std::vector<Recommendation>, LowerScoreAtTop> top;
-    for (const RecipeCandidate& candidate : candidates) {
-        if (isFilteredOut(candidate, context)) {
+    std::priority_queue<Recommendation, std::vector<Recommendation>, WorstAtTop> top;
+    std::set<int> seen;
+    for (const Recipe& recipe : candidates) {
+        if (isFilteredOut(recipe, context) || !seen.insert(recipe.id).second) {
             continue;
         }
-
-        Recommendation current = generateRecommendation(candidate, context);
-        if (static_cast<int>(top.size()) < k) {
+        Recommendation current = generateRecommendation(recipe, context);
+        if (current.recipeId <= 0) {
+            continue;
+        }
+        if (top.size() < static_cast<std::size_t>(k)) {
             top.push(std::move(current));
-        } else if (current.totalScore > top.top().totalScore
-                   || (current.totalScore == top.top().totalScore
-                       && current.dishName < top.top().dishName)) {
+        } else if (better(current, top.top())) {
             top.pop();
             top.push(std::move(current));
         }
     }
-
     std::vector<Recommendation> results;
     results.reserve(top.size());
     while (!top.empty()) {
         results.push_back(top.top());
         top.pop();
     }
-    std::sort(results.begin(), results.end(), [](const Recommendation& left,
-                                                  const Recommendation& right) {
-        if (left.totalScore != right.totalScore) {
-            return left.totalScore > right.totalScore;
-        }
-        return left.dishName < right.dishName;
-    });
+    std::sort(results.begin(), results.end(), better);
     return results;
 }
 
 std::vector<Recommendation> recommend(const UserContext& context)
 {
-    return getTopKRecommendations(context.recipeCandidates, context, context.topK);
+    if (context.topK <= 0 || context.servings <= 0) {
+        return {};
+    }
+    const auto inventory = usableInventory(context.inventory);
+    if (inventory.empty()) {
+        return {};
+    }
+    return getTopKRecommendations(findRecipesByFoods(inventory), context, context.topK);
 }
 
 ExplainResult explainRecommendation(const Recommendation& recommendation)
@@ -165,24 +254,27 @@ ExplainResult explainRecommendation(const Recommendation& recommendation)
     result.preferenceMatchScore = recommendation.preferenceMatchScore;
     result.nutritionScore = recommendation.nutritionScore;
     result.preparationTimeScore = recommendation.preparationTimeScore;
-
-    if (result.ingredientMatchScore >= 50.0) {
-        result.reasons.append(QStringLiteral("现有食材匹配度较高"));
+    result.nutritionScoreAvailable = recommendation.nutritionScoreAvailable;
+    result.missingIngredients = recommendation.missingIngredients;
+    if (recommendation.recipeId <= 0) {
+        return result;
     }
+    result.reasons.append(result.missingIngredients.isEmpty()
+        ? QStringLiteral("库存数量满足当前份数所需的全部食材")
+        : QStringLiteral("还需补齐食材或数量：%1").arg(result.missingIngredients.join(QStringLiteral("、"))));
     if (result.expiryUrgencyScore > 0.0) {
-        result.reasons.append(QStringLiteral("可以优先利用临近到期的食材"));
+        result.reasons.append(QStringLiteral("可利用临近到期的库存食材"));
     }
     if (result.preferenceMatchScore > 0.0) {
-        result.reasons.append(QStringLiteral("符合你的口味偏好"));
+        result.reasons.append(QStringLiteral("包含你偏好的菜谱标签"));
     }
-    if (result.nutritionScore >= 70.0) {
-        result.reasons.append(QStringLiteral("营养评分较高"));
+    if (result.nutritionScoreAvailable) {
+        result.reasons.append(QStringLiteral("能量目标匹配分：%1（使用 C 模块的估算营养数据）")
+                                  .arg(result.nutritionScore, 0, 'f', 1));
     }
-    if (result.preparationTimeScore >= 50.0) {
-        result.reasons.append(QStringLiteral("所需准备时间符合当前设置"));
-    }
-    if (result.reasons.isEmpty()) {
-        result.reasons.append(QStringLiteral("综合评分较高，已进入推荐列表"));
+    if (recommendation.recipe.cookingTimeMinutes > 0) {
+        result.reasons.append(QStringLiteral("预计制作时间：%1 分钟")
+                                  .arg(recommendation.recipe.cookingTimeMinutes));
     }
     return result;
 }
@@ -190,27 +282,13 @@ ExplainResult explainRecommendation(const Recommendation& recommendation)
 UserContext makeDemoUserContext()
 {
     UserContext context;
-    context.availableIngredients = {QStringLiteral("鸡蛋"), QStringLiteral("番茄"),
-                                    QStringLiteral("胡萝卜"), QStringLiteral("米饭")};
+    context.inventory = {{"", "番茄", 300.0}, {"", "鸡蛋", 200.0},
+                         {"", "食用油", 50.0}, {"", "胡萝卜", 200.0}};
     context.expiringIngredients = {QStringLiteral("番茄")};
     context.excludedIngredients = {QStringLiteral("花生")};
     context.preferredTags = {QStringLiteral("家常"), QStringLiteral("清淡")};
     context.maxPreparationMinutes = 40;
     context.topK = 3;
-    context.recipeCandidates = {
-        {QStringLiteral("dish-001"), QStringLiteral("番茄炒蛋"),
-         {QStringLiteral("番茄"), QStringLiteral("鸡蛋")},
-         {QStringLiteral("家常"), QStringLiteral("快手")}, 15, 82.0},
-        {QStringLiteral("dish-002"), QStringLiteral("胡萝卜炒饭"),
-         {QStringLiteral("胡萝卜"), QStringLiteral("米饭"), QStringLiteral("鸡蛋")},
-         {QStringLiteral("家常"), QStringLiteral("清淡")}, 25, 76.0},
-        {QStringLiteral("dish-003"), QStringLiteral("花生拌面"),
-         {QStringLiteral("面条"), QStringLiteral("花生")},
-         {QStringLiteral("家常")}, 20, 68.0},
-        {QStringLiteral("dish-004"), QStringLiteral("慢炖蔬菜汤"),
-         {QStringLiteral("胡萝卜"), QStringLiteral("土豆")},
-         {QStringLiteral("清淡")}, 70, 90.0}
-    };
     return context;
 }
 
