@@ -107,6 +107,7 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     parse_ = new QPushButton("解析日期信息", this);
     layout->addWidget(parse_);
     status_ = new QLabel("请填写食材信息，并选择日期依据。", this);
+    status_->setObjectName("entryStatus");
     status_->setTextFormat(Qt::PlainText);
     status_->setWordWrap(true);
     layout->addWidget(status_);
@@ -226,12 +227,28 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
         if (!submit_->isEnabled()) return;
         std::vector<FoodCandidate> foods;
         for (const auto& entry : entries_) foods.push_back(entry.food);
+        submitting_ = true;
+        status_->setText("正在保存食材……");
+        setEnabled(false);
+        refresh();
         emit foodsConfirmed(foods);
-        entries_.clear(); list_->clear(); refresh();
-        status_->setText("已输出整批食材候选；是否成功入库由接收模块处理。");
     });
     connect(list_, &QListWidget::currentRowChanged, this, &PackagingEntryWidget::refresh);
     refresh();
+}
+
+void PackagingEntryWidget::completeSubmission(bool success, const QString& message)
+{
+    if (!submitting_) return;
+    const int count = static_cast<int>(entries_.size());
+    if (success) { entries_.clear(); list_->clear(); }
+    submitting_ = false;
+    setEnabled(true);
+    refresh();
+    status_->setText(message.isEmpty()
+        ? (success ? QString("已成功保存 %1 条食材，可继续录入。").arg(count)
+                   : QStringLiteral("保存失败，待提交内容已保留，请重试。"))
+        : message);
 }
 
 void PackagingEntryWidget::chooseImage()
@@ -338,7 +355,7 @@ void PackagingEntryWidget::refresh()
         || !imagePath_.isEmpty() || mode_->currentIndex() != 0 || !production_->text().isEmpty()
         || !expiry_->text().isEmpty() || period_->value() != 0 || !unit_->currentText().isEmpty()
         || quantity_->value() != 1;
-    submit_->setEnabled(!entries_.empty() && editingRow_ < 0 && !unfinished && !ocr_.isBusy());
+    submit_->setEnabled(!submitting_ && !entries_.empty() && editingRow_ < 0 && !unfinished && !ocr_.isBusy());
 }
 
 void PackagingEntryWidget::clearForm()

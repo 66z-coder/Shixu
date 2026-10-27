@@ -19,6 +19,8 @@ class PackagingEntryWidget : public QWidget
     Q_OBJECT
 public:
     explicit PackagingEntryWidget(QWidget* parent = nullptr);
+    // Receiver must acknowledge each foodsConfirmed submission.
+    void completeSubmission(bool success, const QString& message = QString());
 signals:
     void foodsConfirmed(const std::vector<FoodCandidate>& foods);
 private:
@@ -46,6 +48,7 @@ private:
     };
     std::vector<Entry> entries_;
     int editingRow_ = -1;
+    bool submitting_ = false;
     QString imagePath_;
     QDate storageStart_;
     ReceiptOcrService ocr_;

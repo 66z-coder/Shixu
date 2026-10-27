@@ -1,4 +1,5 @@
 #include "ui/MainWindow.h"
+#include "recognition/PackagingEntryWidget.h"
 
 #include "reward/RewardSystem.h"
 #include "ui/CheckInWidget.h"
@@ -153,6 +154,17 @@ MainWindow::MainWindow(QWidget* parent)
 
     auto* rewards = new RewardSystem(this);
     m_inventory = new InventoryManager;
+    auto* entry = new PackagingEntryWidget(m_pages);
+    setPage(Page::FoodEntry, entry);
+    connect(entry, &PackagingEntryWidget::foodsConfirmed, this,
+            [this, entry](const std::vector<FoodCandidate>& foods) {
+        QList<FoodCandidate> batch;
+        for (const auto& food : foods) batch.append(food);
+        QString error;
+        const bool saved = m_inventory->addFoods(batch, &error);
+        entry->completeSubmission(saved, saved ? QString() : error);
+        if (saved) refreshInventory();
+    });
     m_home = new HomeWidget(rewards, m_pages);
     m_inventoryPage = new InventoryWidget(m_pages);
     setPage(Page::Home, m_home);

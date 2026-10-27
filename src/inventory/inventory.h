@@ -15,6 +15,8 @@ public:
     ~InventoryManager();
 
     void addFood(const FoodCandidate& candidate);
+    // All-or-nothing batch insert. Unknown weight is zero; errors leave no partial batch.
+    bool addFoods(const QList<FoodCandidate>& foods, QString* error = nullptr);
 
     QList<FoodCandidate> getAllItems() const;
 
@@ -27,6 +29,7 @@ public:
 
 private:
     QSqlDatabase database;
+    QString initializationError_;
 };
 
 #endif // INVENTORY_MANAGER_H
