@@ -153,15 +153,15 @@ MainWindow::MainWindow(QWidget* parent)
 
     auto* rewards = new RewardSystem(this);
     m_inventory = new InventoryManager;
-    m_home = new HomeWidget(rewards);
-    m_inventoryPage = new InventoryWidget;
+    m_home = new HomeWidget(rewards, m_pages);
+    m_inventoryPage = new InventoryWidget(m_pages);
     setPage(Page::Home, m_home);
     setPage(Page::Inventory, m_inventoryPage);
     connect(m_home, &HomeWidget::foodEntryRequested, this, [this] { showPage(Page::FoodEntry); });
     connect(m_home, &HomeWidget::inventoryRequested, this, [this] { showPage(Page::Inventory); });
     connect(m_home, &HomeWidget::recipesRequested, this, [this] { showPage(Page::Recipes); });
     connect(m_home, &HomeWidget::checkInRequested, this, [this] { showPage(Page::CheckIn); });
-    auto* recommendations = new RecommendationWidget;
+    auto* recommendations = new RecommendationWidget(m_pages);
     setPage(Page::Recommendations, recommendations);
     connect(recommendations, &RecommendationWidget::recommendationRequested, this,
             [this, recommendations](Shixu::RecommendationEngine::Mood mood,
@@ -200,8 +200,8 @@ MainWindow::MainWindow(QWidget* parent)
         }
         recommendations->setRecommendations(items);
     });
-    setPage(Page::CheckIn, new CheckInWidget(rewards));
-    setPage(Page::Statistics, new StatisticsWidget(rewards));
+    setPage(Page::CheckIn, new CheckInWidget(rewards, m_pages));
+    setPage(Page::Statistics, new StatisticsWidget(rewards, m_pages));
     showPage(Page::Home);
 }
 
