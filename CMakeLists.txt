@@ -14,6 +14,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # 检测到 Qt Widgets 时，构建主程序和 A 模块测试。
 # 未检测到时，仍可构建不依赖 Qt 的 C 模块测试。
 find_package(QT NAMES Qt6 Qt5 QUIET COMPONENTS Widgets)
+include(CTest)
 
 if(QT_FOUND)
     find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Sql)
@@ -93,21 +94,37 @@ if(QT_FOUND)
     set(CMAKE_AUTOUIC ON)
     set(CMAKE_AUTORCC ON)
 
-    # 主程序：包含 A、C 模块源码
-        add_executable(Shixu
+    # 主程序：A/B/C 模块与 E 的主界面、成长系统
+    add_executable(Shixu
         src/main.cpp
         ${SHIXU_RECIPE_SOURCES}
         ${SHIXU_RECOGNITION_SOURCES}
         src/inventory/inventory.cpp
         src/inventory/inventory.h
         include/model/FoodCandidate.h
+        include/ui/MainWindow.h
+        src/ui/MainWindow.cpp
+        include/reward/RewardSystem.h
+        src/reward/RewardSystem.cpp
+        include/ui/CheckInWidget.h
+        src/ui/CheckInWidget.cpp
+        include/ui/StatisticsWidget.h
+        src/ui/StatisticsWidget.cpp
+        include/ui/RecommendationWidget.h
+        src/ui/RecommendationWidget.cpp
+        include/ui/HomeWidget.h
+        src/ui/HomeWidget.cpp
+        resources/home.qrc
+        include/ui/InventoryWidget.h
+        src/ui/InventoryWidget.cpp
     )
 
     target_include_directories(Shixu PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
 
-        target_link_libraries(Shixu PRIVATE
+    target_link_libraries(Shixu PRIVATE
         Qt${QT_VERSION_MAJOR}::Widgets
         Qt${QT_VERSION_MAJOR}::Sql
     )
@@ -124,7 +141,7 @@ if(QT_FOUND)
 
     target_link_libraries(recognition_test PRIVATE
         Qt${QT_VERSION_MAJOR}::Widgets
-      
+
     )
 
     # A 模块：食材录入界面演示
@@ -142,7 +159,7 @@ if(QT_FOUND)
     )
 
 
-        # B 模块：库存管理独立测试
+    # B 模块：库存管理独立测试
     add_executable(TestInventory
         test_inventory.cpp
         src/inventory/inventory.cpp
@@ -160,8 +177,30 @@ if(QT_FOUND)
         Qt${QT_VERSION_MAJOR}::Sql
     )
 
+    if(BUILD_TESTING)
+        add_executable(RewardSystemTest
+            tests/reward/RewardSystemTest.cpp
+            include/reward/RewardSystem.h
+            src/reward/RewardSystem.cpp
+        )
+        target_include_directories(RewardSystemTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+        target_link_libraries(RewardSystemTest PRIVATE Qt${QT_VERSION_MAJOR}::Core)
+        add_test(NAME RewardSystemTest COMMAND RewardSystemTest)
 
-
-
-
+        add_executable(InventoryIntegrationTest
+            tests/inventory/InventoryIntegrationTest.cpp
+            src/inventory/inventory.cpp
+            src/inventory/inventory.h
+            include/model/FoodCandidate.h
+        )
+        target_include_directories(InventoryIntegrationTest PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+        )
+        target_link_libraries(InventoryIntegrationTest PRIVATE
+            Qt${QT_VERSION_MAJOR}::Core
+            Qt${QT_VERSION_MAJOR}::Sql
+        )
+        add_test(NAME InventoryIntegrationTest COMMAND InventoryIntegrationTest)
+    endif()
 endif()
