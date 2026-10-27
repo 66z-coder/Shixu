@@ -16,7 +16,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(QT NAMES Qt6 Qt5 QUIET COMPONENTS Widgets)
 
 if(QT_FOUND)
-    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Sql)
     message(STATUS "Shixu: 检测到 Qt，启用主程序和 A 模块测试")
 else()
     message(WARNING
@@ -94,18 +94,22 @@ if(QT_FOUND)
     set(CMAKE_AUTORCC ON)
 
     # 主程序：包含 A、C 模块源码
-    add_executable(Shixu
+        add_executable(Shixu
         src/main.cpp
         ${SHIXU_RECIPE_SOURCES}
         ${SHIXU_RECOGNITION_SOURCES}
+        src/inventory/inventory.cpp
+        src/inventory/inventory.h
+        include/model/FoodCandidate.h
     )
 
     target_include_directories(Shixu PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
 
-    target_link_libraries(Shixu PRIVATE
+        target_link_libraries(Shixu PRIVATE
         Qt${QT_VERSION_MAJOR}::Widgets
+        Qt${QT_VERSION_MAJOR}::Sql
     )
 
     # A 模块：识别服务测试
@@ -120,6 +124,7 @@ if(QT_FOUND)
 
     target_link_libraries(recognition_test PRIVATE
         Qt${QT_VERSION_MAJOR}::Widgets
+      
     )
 
     # A 模块：食材录入界面演示
@@ -135,4 +140,28 @@ if(QT_FOUND)
     target_link_libraries(food_entry_demo PRIVATE
         Qt${QT_VERSION_MAJOR}::Widgets
     )
+
+
+        # B 模块：库存管理独立测试
+    add_executable(TestInventory
+        test_inventory.cpp
+        src/inventory/inventory.cpp
+        src/inventory/inventory.h
+        include/model/FoodCandidate.h
+    )
+
+    target_include_directories(TestInventory PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/inventory
+    )
+
+    target_link_libraries(TestInventory PRIVATE
+        Qt${QT_VERSION_MAJOR}::Widgets
+        Qt${QT_VERSION_MAJOR}::Sql
+    )
+
+
+
+
+
 endif()
