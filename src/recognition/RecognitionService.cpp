@@ -1,18 +1,37 @@
 
 #include "recognition/RecognitionService.h"
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 
-// 小票识别：暂时预留接口
-RecognitionResult RecognitionService::recognizeReceipt(
-    const QString& imagePath
-) const
+namespace {
+const QJsonObject& mappings()
 {
-    Q_UNUSED(imagePath);
+    static const QJsonObject data = [] {
+        QFile file(":/recognition/normalization.json");
+        if (!file.open(QIODevice::ReadOnly)) return QJsonObject{};
+        return QJsonDocument::fromJson(file.readAll()).object();
+    }();
+    return data;
+}
+}
 
-    RecognitionResult result;
-    result.success = false;
-    result.errorMessage = "小票 OCR 功能尚未接入";
+QString RecognitionService::normalizeFoodName(const QString& text) const
+{
+    const QString name = text.normalized(QString::NormalizationForm_KC).simplified();
+    return mappings().value("names").toObject().value(name).toString(name);
+}
 
-    return result;
+QString RecognitionService::normalizeUnit(const QString& text) const
+{
+    const QString unit = text.normalized(QString::NormalizationForm_KC).trimmed().toLower();
+    return mappings().value("units").toObject().value(unit).toString(unit);
+}
+
+bool RecognitionService::isSupportedUnit(const QString& text) const
+{
+    return mappings().value("units").toObject().contains(
+        text.normalized(QString::NormalizationForm_KC).trimmed().toLower());
 }
 
 // 食材信息标准化
@@ -23,24 +42,17 @@ FoodCandidate RecognitionService::standardizeRecognitionResult(
     FoodCandidate result = input;
 
     // 1. 清理名称中多余的空格
-    result.name = result.name.simplified();
+    result.name = normalizeFoodName(result.name);
 
     // 2. 统一常见食材名称
-    if (result.name == "西红柿") {
-        result.name = "番茄";
-    }
 
     // 3. 处理单位
-    result.unit = result.unit.trimmed();
+    result.unit = normalizeUnit(result.unit);
 
     if (result.unit.isEmpty()) {
         result.unit = "个";
     }
 
-    if (result.unit == "公斤" ||
-        result.unit == "千克") {
-        result.unit = "kg";
-    }
 
     // 数量和日期保持原样
     return result;

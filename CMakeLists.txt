@@ -35,22 +35,38 @@ if(QT_FOUND)
     set(CMAKE_AUTOUIC ON)
     set(CMAKE_AUTORCC ON)
 
-    # A: retain the entry widget, standardization service and demo targets.
+    # A: packaging-date OCR, manual entry and normalization.
     add_library(ShixuRecognition STATIC
         src/recognition/RecognitionService.cpp
-        src/recognition/FoodEntryWidget.cpp
-        include/recognition/FoodEntryWidget.h
+        src/recognition/PackagingEntryWidget.cpp
+        src/recognition/PackagingDateParser.cpp
+        src/recognition/ReceiptOcrService.cpp
+        include/recognition/PackagingEntryWidget.h
+        include/recognition/ReceiptOcrService.h
     )
     target_include_directories(ShixuRecognition PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_definitions(ShixuRecognition PRIVATE SHIXU_PROJECT_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(ShixuRecognition PUBLIC Qt${QT_VERSION_MAJOR}::Widgets)
 
-    add_executable(food_entry_demo tests/recognition/food_entry_demo.cpp)
+    add_executable(food_entry_demo tests/recognition/food_entry_demo.cpp resources/recognition.qrc)
     target_link_libraries(food_entry_demo PRIVATE ShixuRecognition)
 
     if(BUILD_TESTING)
-        add_executable(recognition_test tests/recognition/recognition_test.cpp)
+        add_executable(recognition_test tests/recognition/recognition_test.cpp resources/recognition.qrc)
         target_link_libraries(recognition_test PRIVATE ShixuRecognition)
         add_test(NAME recognition_test COMMAND recognition_test)
+        foreach(pair IN ITEMS "receipt_ocr_test|receipt_ocr_protocol" "packaging_date_test|packaging_date"
+                              "packaging_entry_test|packaging_entry")
+            string(REPLACE "|" ";" parts "${pair}")
+            list(GET parts 0 target_name)
+            list(GET parts 1 test_name)
+            add_executable(${target_name} tests/recognition/${target_name}.cpp resources/recognition.qrc)
+            target_link_libraries(${target_name} PRIVATE ShixuRecognition)
+            target_compile_definitions(${target_name} PRIVATE SHIXU_PROJECT_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+            add_test(NAME ${test_name} COMMAND ${target_name})
+        endforeach()
+        set_tests_properties(packaging_entry PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+
     endif()
 
     add_library(ShixuRecommendation STATIC src/recommendation/RecommendationEngine.cpp)
@@ -73,6 +89,7 @@ if(QT_FOUND)
         include/ui/HomeWidget.h
         src/ui/HomeWidget.cpp
         resources/home.qrc
+        resources/recognition.qrc
         include/ui/InventoryWidget.h
         src/ui/InventoryWidget.cpp
     )

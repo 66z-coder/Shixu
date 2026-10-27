@@ -2,6 +2,7 @@
 # CMake build
 # =========================
 build/
+build-*/
 cmake-build-*/
 out/
 
@@ -58,3 +59,10 @@ Desktop.ini
 *.log
 *.bak
 *~
+
+# 本地 OCR 运行环境和第三方模型，不计入自编代码
+.venv-ocr/
+ocr/models/
+ocr/.downloads/
+__pycache__/
+*.pyc
