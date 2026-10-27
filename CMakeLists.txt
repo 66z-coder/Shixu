@@ -35,12 +35,30 @@ if(QT_FOUND)
     set(CMAKE_AUTOUIC ON)
     set(CMAKE_AUTORCC ON)
 
+    # A: retain the entry widget, standardization service and demo targets.
+    add_library(ShixuRecognition STATIC
+        src/recognition/RecognitionService.cpp
+        src/recognition/FoodEntryWidget.cpp
+        include/recognition/FoodEntryWidget.h
+    )
+    target_include_directories(ShixuRecognition PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(ShixuRecognition PUBLIC Qt${QT_VERSION_MAJOR}::Widgets)
+
+    add_executable(food_entry_demo tests/recognition/food_entry_demo.cpp)
+    target_link_libraries(food_entry_demo PRIVATE ShixuRecognition)
+
+    if(BUILD_TESTING)
+        add_executable(recognition_test tests/recognition/recognition_test.cpp)
+        target_link_libraries(recognition_test PRIVATE ShixuRecognition)
+        add_test(NAME recognition_test COMMAND recognition_test)
+    endif()
+
     add_library(ShixuRecommendation STATIC src/recommendation/RecommendationEngine.cpp)
     target_include_directories(ShixuRecommendation PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(ShixuRecommendation PUBLIC ShixuRecipe Qt${QT_VERSION_MAJOR}::Core)
 
     add_executable(Shixu src/main.cpp)
-    target_link_libraries(Shixu PRIVATE ShixuRecommendation Qt${QT_VERSION_MAJOR}::Widgets)
+    target_link_libraries(Shixu PRIVATE ShixuRecommendation ShixuRecognition Qt${QT_VERSION_MAJOR}::Widgets)
 
     add_executable(RecommendationDemo src/recommendation/demo_main.cpp)
     target_link_libraries(RecommendationDemo PRIVATE ShixuRecommendation Qt${QT_VERSION_MAJOR}::Widgets)
