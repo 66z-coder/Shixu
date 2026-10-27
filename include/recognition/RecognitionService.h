@@ -3,16 +3,13 @@
 
 #include <QString>
 #include "model/FoodCandidate.h"
-#include "model/RecognitionResult.h"
 
 class RecognitionService
 {
 public:
-    // 小票 OCR 识别
-    RecognitionResult recognizeReceipt(
-        const QString& imagePath
-    ) const;
-
+    QString normalizeFoodName(const QString& text) const;
+    QString normalizeUnit(const QString& text) const;
+    bool isSupportedUnit(const QString& text) const;
     // 食材信息标准化
     FoodCandidate standardizeRecognitionResult(
         const FoodCandidate& input

@@ -3,18 +3,18 @@
 #include <QMessageBox>
 #include <QStringList>
 
-#include "recognition/FoodEntryWidget.h"
+#include "recognition/PackagingEntryWidget.h"
 
 int main(int argc, char* argv[])
 {
     QApplication app(argc, argv);
 
-    FoodEntryWidget window;
+    PackagingEntryWidget window;
 
     // 接收 A 模块提交的食材
     QObject::connect(
         &window,
-        &FoodEntryWidget::foodsConfirmed,
+        &PackagingEntryWidget::foodsConfirmed,
         &window,
         [&window](const std::vector<FoodCandidate>& foods) {
 
@@ -58,7 +58,10 @@ int main(int argc, char* argv[])
                              .arg(food.name)
                              .arg(food.quantity)
                              .arg(food.unit)
-                             .arg(dateText);
+                             .arg(dateText)
+                             + (food.totalWeightGrams > 0
+                                ? QString(" | 总重量：%1 g").arg(food.totalWeightGrams, 0, 'f', 1)
+                                : QStringLiteral(" | 总重量：未知"));
             }
 
             // 6. 显示最终收到的数据
