@@ -5,6 +5,9 @@
 #include <QString>
 #include <QWidget>
 
+#include "recommendation/RecommendationEngine.h"
+
+class QButtonGroup;
 class QLabel;
 class QGridLayout;
 class QPaintEvent;
@@ -26,12 +29,15 @@ class HomeWidget : public QWidget
 public:
     explicit HomeWidget(RewardSystem* rewards, QWidget* parent = nullptr);
     void setInventory(const QList<HomeFoodItem>& foods);
+    void selectMood(Shixu::RecommendationEngine::Mood mood);
 
 signals:
     void foodEntryRequested();
     void inventoryRequested();
     void recipesRequested();
     void checkInRequested();
+    void moodRecommendationRequested(Shixu::RecommendationEngine::Mood mood);
+    void moodSelected(Shixu::RecommendationEngine::Mood mood);
 
 private:
     void refresh();
@@ -48,6 +54,8 @@ private:
     QLabel* m_inventoryPreview;
     QLabel* m_expiringPreview;
     QLabel* m_checkInStatus;
+    QButtonGroup* m_moodButtons;
+    QLabel* m_moodHint;
     QGridLayout* m_foodGrid;
     QList<HomeFoodItem> m_foods;
     bool m_inventoryConnected = false;

@@ -86,6 +86,17 @@ if(QT_FOUND)
         add_executable(RecommendationTests tests/recommend/test_recommendation.cpp)
         target_link_libraries(RecommendationTests PRIVATE ShixuRecommendation)
         add_test(NAME RecommendationTests COMMAND RecommendationTests)
+
+        add_executable(RecommendationWidgetTest
+            tests/ui/RecommendationWidgetTest.cpp
+            include/ui/RecommendationWidget.h
+            src/ui/RecommendationWidget.cpp
+        )
+        target_include_directories(RecommendationWidgetTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+        target_link_libraries(RecommendationWidgetTest PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
+        add_test(NAME RecommendationWidgetTest COMMAND RecommendationWidgetTest)
+        set_tests_properties(RecommendationWidgetTest PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     endif()
 
     # Prefer B in the shared tree once merged. Until then, a caller may supply
@@ -155,6 +166,7 @@ if(QT_FOUND)
 
         add_library(ShixuRecommendationInventory STATIC src/recommendation/RecommendationContextBuilder.cpp)
         target_link_libraries(ShixuRecommendationInventory PUBLIC ShixuRecommendation ShixuInventory)
+        target_link_libraries(Shixu PRIVATE ShixuRecommendationInventory)
 
         add_executable(RecommendationLiveDemo src/recommendation/live_demo_main.cpp)
         target_link_libraries(RecommendationLiveDemo PRIVATE ShixuRecommendationInventory Qt${QT_VERSION_MAJOR}::Widgets)

@@ -7,6 +7,8 @@
 #include "ui/RecommendationWidget.h"
 #include "ui/StatisticsWidget.h"
 #include "inventory/inventory.h"
+#include "recommendation/RecommendationContextBuilder.h"
+#include "recommendation/RecommendationEngine.h"
 
 #include <QButtonGroup>
 #include <QFrame>
@@ -151,17 +153,64 @@ MainWindow::MainWindow(QWidget* parent)
 
     auto* rewards = new RewardSystem(this);
     m_inventory = new InventoryManager;
-    m_home = new HomeWidget(rewards);
-    m_inventoryPage = new InventoryWidget;
+    m_home = new HomeWidget(rewards, m_pages);
+    m_inventoryPage = new InventoryWidget(m_pages);
     setPage(Page::Home, m_home);
     setPage(Page::Inventory, m_inventoryPage);
     connect(m_home, &HomeWidget::foodEntryRequested, this, [this] { showPage(Page::FoodEntry); });
     connect(m_home, &HomeWidget::inventoryRequested, this, [this] { showPage(Page::Inventory); });
     connect(m_home, &HomeWidget::recipesRequested, this, [this] { showPage(Page::Recipes); });
     connect(m_home, &HomeWidget::checkInRequested, this, [this] { showPage(Page::CheckIn); });
-    setPage(Page::Recommendations, new RecommendationWidget);
-    setPage(Page::CheckIn, new CheckInWidget(rewards));
-    setPage(Page::Statistics, new StatisticsWidget(rewards));
+    auto* recommendations = new RecommendationWidget(m_pages);
+    setPage(Page::Recommendations, recommendations);
+    connect(m_home, &HomeWidget::moodSelected,
+            recommendations, &RecommendationWidget::selectMood);
+    connect(recommendations, &RecommendationWidget::moodSelected,
+            m_home, &HomeWidget::selectMood);    connect(m_home, &HomeWidget::moodRecommendationRequested, this,
+            [this, recommendations](Shixu::RecommendationEngine::Mood mood) {
+        recommendations->selectMood(mood);
+        showPage(Page::Recommendations);
+        recommendations->requestRecommendations();
+    });
+    connect(recommendations, &RecommendationWidget::recommendationRequested, this,
+            [this, recommendations](Shixu::RecommendationEngine::Mood mood,
+                                    int maxPreparationMinutes) {
+        namespace D = Shixu::RecommendationEngine;
+        D::UserContext preferences;
+        preferences.mood = mood;
+        preferences.maxPreparationMinutes = maxPreparationMinutes;
+        preferences.topK = 5;
+        preferences.servings = 1;
+
+        const D::ContextBuildResult built = D::readUserContext(*m_inventory, preferences);
+        recommendations->setWarnings(built.warnings);
+
+        const auto results = D::recommend(built.context);
+        QVector<RecommendationViewItem> items;
+        items.reserve(static_cast<int>(results.size()));
+        for (const D::Recommendation& result : results) {
+            RecommendationViewItem item;
+            item.recipeId = result.recipeId;
+            item.dishName = result.dishName;
+            item.cookingTimeMinutes = result.recipe.cookingTimeMinutes;
+            item.moodName = D::moodDisplayName(result.mood);
+            item.effectiveMaxPreparationMinutes = result.effectiveMaxPreparationMinutes;
+            item.totalScore = result.totalScore;
+            item.ingredientMatchScore = result.ingredientMatchScore;
+            item.expiryUrgencyScore = result.expiryUrgencyScore;
+            item.moodMatchScore = result.moodMatchScore;
+            item.nutritionScore = result.nutritionScore;
+            item.nutritionScoreAvailable = result.nutritionScoreAvailable;
+            item.preparationTimeScore = result.preparationTimeScore;
+            item.preparationTimeReferenceMinutes = result.preparationTimeReferenceMinutes;
+            item.missingIngredients = result.missingIngredients;
+            item.reasons = D::explainRecommendation(result).reasons;
+            items.append(item);
+        }
+        recommendations->setRecommendations(items);
+    });
+    setPage(Page::CheckIn, new CheckInWidget(rewards, m_pages));
+    setPage(Page::Statistics, new StatisticsWidget(rewards, m_pages));
     showPage(Page::Home);
 }
 
