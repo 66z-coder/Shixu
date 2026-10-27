@@ -1,5 +1,5 @@
 # 包装图片本地 OCR
-运行 build/food_entry_demo.exe 或 build/Shixu.exe，点击“导入包装图片”→“识别包装文字”→“解析日期信息”，核对后添加到待提交列表。支持取消和 120 秒超时。日期录入见 [包装日期说明](packaging_dates.md)。
+运行 build/food_entry_demo.exe（Shixu.exe 为整合主界面），点击“导入包装图片”→“识别包装文字”→“解析日期信息”，核对后添加到待提交列表。支持取消和 120 秒超时。日期录入见 [包装日期说明](packaging_dates.md)。
 
 ## 本地环境
 
