@@ -5,34 +5,54 @@
 #include <QVector>
 #include <QWidget>
 
+#include "recommendation/RecommendationEngine.h"
+
+class QButtonGroup;
 class QLabel;
+class QSpinBox;
 class QVBoxLayout;
 
-// Presentation data kept separate from the recommendation algorithm's
-// temporary recipe and inventory types. The integration layer will map the
-// finalized recommendation result into this structure.
 struct RecommendationViewItem
 {
-    QString recipeId;
+    int recipeId = 0;
     QString dishName;
+    int cookingTimeMinutes = 0;
+    QString moodName;
+    int effectiveMaxPreparationMinutes = 0;
     double totalScore = 0.0;
     double ingredientMatchScore = 0.0;
     double expiryUrgencyScore = 0.0;
-    double preferenceMatchScore = 0.0;
+    double moodMatchScore = 0.0;
     double nutritionScore = 0.0;
+    bool nutritionScoreAvailable = false;
     double preparationTimeScore = 0.0;
+    int preparationTimeReferenceMinutes = 0;
+    QStringList missingIngredients;
     QStringList reasons;
 };
 
 class RecommendationWidget : public QWidget
 {
+    Q_OBJECT
+
 public:
     explicit RecommendationWidget(QWidget* parent = nullptr);
 
+    void setWarnings(const QStringList& warnings);
     void setRecommendations(const QVector<RecommendationViewItem>& items);
 
+signals:
+    void recommendationRequested(Shixu::RecommendationEngine::Mood mood,
+                                 int maxPreparationMinutes);
+
 private:
+    QButtonGroup* m_moodButtons = nullptr;
+    QSpinBox* m_customLimit = nullptr;
+    QLabel* m_selectionHint = nullptr;
+    QLabel* m_warning = nullptr;
     QLabel* m_summary = nullptr;
+    QLabel* m_emptyTitle = nullptr;
+    QLabel* m_emptyDescription = nullptr;
     QWidget* m_emptyState = nullptr;
     QVBoxLayout* m_resultsLayout = nullptr;
 };
