@@ -220,6 +220,41 @@ void isolationAndFailures()
     r.data={recipe(1)};c.targetCaloriesPerServing=100;
     result=s->recommend(c);check(result.cards[0].nutritionScoreAvailable&&result.cards[0].nutritionScore==100,"C nutrition formula reused");
 }
+void honestReasons()
+{
+    Recipes r; Stock b; b.enoughByDefault=true;
+    auto service=V::createRecommendationService(r,b);
+    // Reviewer reproduction: only appetizing/hearty, never high-protein.
+    for (const auto& tags : {std::vector<std::string>{V::Tags::Appetizing,V::Tags::Hearty},
+                            std::vector<std::string>{}}) {
+        r.data={recipe(1,20,tags),recipe(2,20,tags),recipe(3,20,tags)};
+        for(int mood=1;mood<=5;++mood){
+            auto result=service->recommend(context(static_cast<V::Mood>(mood),75));
+            validCards(result,75);
+            check(result.cards.size()==3,"Reproduce all three roles");
+            for(const auto& card:result.cards){
+                const auto reason=card.reasons.join(";");
+                for(const char* absent : {"高蛋白","蔬菜丰富","清淡","快手","简单","丰盛特色"})
+                    check(!reason.contains(QString::fromUtf8(absent)),"No absent-tag claims for any mood/role");
+                check(!reason.contains(QStringLiteral("主要食材与前两道不同"))
+                    && !reason.contains(QStringLiteral("类别与前两道不同")),"No fabricated diversity");
+                if(tags.empty()&&card.role!=V::CardRole::Primary)
+                    check(reason.contains(QStringLiteral("未命中该备选侧重标签")),"Explain fallback selection");
+            }
+        }
+    }
+    r.data={recipe(1,20,{V::Tags::HighProtein}),recipe(2,20,{V::Tags::VegetableRich}),
+        recipe(3,20,{V::Tags::Light})};
+    auto result=service->recommend(context(V::Mood::WantLight,40));
+    for(const auto& card:result.cards){
+        const auto reason=card.reasons.join(";");
+        for(const auto& pair : {std::pair<const char*,const char*>{V::Tags::HighProtein,"高蛋白"},
+            {V::Tags::VegetableRich,"蔬菜丰富"},{V::Tags::Light,"清淡"}}){
+            const bool present=std::find(card.recipe.tags.begin(),card.recipe.tags.end(),pair.first)!=card.recipe.tags.end();
+            check(reason.contains(QString::fromUtf8(pair.second))==present,"Labels follow each selected recipe");
+        }
+    }
+}
 QString outputExample()
 {
     Recipes r; Stock b;
@@ -289,7 +324,7 @@ int main(int argc,char** argv)
 {
     QCoreApplication app(argc,argv);
     try {
-        timesAndValidation(); policiesAndUnknown(); batchesAndRefinements(); moodsAndRoles(); isolationAndFailures();
+        timesAndValidation(); policiesAndUnknown(); batchesAndRefinements(); moodsAndRoles(); isolationAndFailures(); honestReasons();
         if(app.arguments().contains(QStringLiteral("--show-output"))){
             const auto report=outputExample().toUtf8();
             std::cout.write(report.constData(),report.size());

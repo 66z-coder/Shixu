@@ -241,19 +241,38 @@ public:
             chosen.role = position == 0 ? CardRole::Primary
                 : position == 1 ? CardRole::AlternativeOne : CardRole::AlternativeTwo;
             QString label = QStringLiteral("今晚首选，综合当前条件");
-            if (position == 1) {
+            if (position > 0) {
+                const Recipe& r = chosen.recipe;
+                bool matchesFocus = false;
                 switch (p.mood) {
-                case Mood::Tired: case Mood::WantGoodFood: label = QStringLiteral("备选一，侧重省事快捷"); break;
-                case Mood::LowAppetite: label = QStringLiteral("备选一，侧重清淡标签"); break;
-                case Mood::WantLight: label = QStringLiteral("备选一，侧重蔬菜丰富标签"); break;
-                case Mood::TreatMyself: label = QStringLiteral("备选一，侧重丰盛特色标签"); break;
+                case Mood::Tired:
+                    matchesFocus = tag(r, Tags::Quick) || tag(r, Tags::Easy); break;
+                case Mood::WantGoodFood:
+                    matchesFocus = position == 1 ? tag(r, Tags::Quick) || tag(r, Tags::Easy)
+                        : tag(r, Tags::Hearty) || tag(r, Tags::Appetizing); break;
+                case Mood::LowAppetite:
+                    matchesFocus = position == 1 ? tag(r, Tags::Light)
+                        : tag(r, Tags::Quick) || tag(r, Tags::Easy); break;
+                case Mood::WantLight:
+                    matchesFocus = position == 1 ? tag(r, Tags::VegetableRich) : tag(r, Tags::HighProtein); break;
+                case Mood::TreatMyself:
+                    matchesFocus = position == 1 ? tag(r, Tags::Hearty) || tag(r, Tags::Special)
+                        : tag(r, Tags::Special); break;
                 default: break;
                 }
-            } else if (position == 2) {
-                label = QStringLiteral("备选二，兼顾食材和类别差异");
-                if (p.mood == Mood::WantLight) label += QStringLiteral("及高蛋白标签");
-                if (p.mood == Mood::LowAppetite || p.mood == Mood::TreatMyself)
-                    label += QStringLiteral("及省事程度");
+                label = position == 1 ? QStringLiteral("备选一") : QStringLiteral("备选二");
+                label += matchesFocus ? QStringLiteral("，根据实际菜谱标签与综合评分选择")
+                    : QStringLiteral("，未命中该备选侧重标签，按综合评分和制作时间选择");
+                if (position == 2) {
+                    bool differentMain = true, differentCategory = !r.category.empty();
+                    for (const auto& previous : result.cards) {
+                        differentMain &= mainIngredient(r) != mainIngredient(previous.recipe);
+                        differentCategory &= !previous.recipe.category.empty() && r.category != previous.recipe.category;
+                    }
+                    if (differentMain) label += QStringLiteral("；主要食材与前两道不同");
+                    else if (differentCategory) label += QStringLiteral("；类别与前两道不同");
+                    else label += QStringLiteral("；保留另一道符合当前约束的选择");
+                }
             }
             chosen.reasons << QStringLiteral("%1：%2；预计%3分钟，上限%4分钟")
                 .arg(label, traits(chosen.recipe)).arg(chosen.recipe.cookingTimeMinutes).arg(p.maxPreparationMinutes);
