@@ -8,6 +8,8 @@
 #include <QTemporaryDir>
 #include <QDebug>
 
+#include <algorithm>
+
 #include <cmath>
 #include <memory>
 
@@ -315,6 +317,159 @@ int main(int argc, char* argv[])
         }
     }
 
+
+    // 旧库存重量换算测试
+    {
+        InventoryManager inventory;
+
+        FoodCandidate rice;
+        rice.name = QStringLiteral("测试大米");
+        rice.quantity = 500.0;
+        rice.unit = QStringLiteral("g");
+        rice.expiryDate = QDate(2026, 12, 31);
+        rice.gramsPerUnit = 0.0;
+        rice.totalWeightGrams = 0.0;
+
+        inventory.addFood(rice);
+
+        auto service = createInventoryService(inventory);
+
+        if (service) {
+            const auto snapshot = service->getInventoryBatches();
+
+            for (const auto& batch : snapshot.value.batches) {
+    qInfo() << "Legacy batch:"
+            << QString::fromStdString(batch.name)
+            << "quantity:" << batch.quantity
+            << "unit:" << QString::fromStdString(batch.unit)
+            << "gramsPerUnit:" << batch.gramsPerUnit
+            << "totalWeightGrams:" << batch.totalWeightGrams;
+}
+
+            check(
+                snapshot.outcome.status == OperationStatus::Succeeded,
+                "Legacy inventory snapshot succeeds"
+            );
+
+            if (snapshot.outcome.status == OperationStatus::Succeeded) {
+    bool found = false;
+
+    for (const auto& batch : snapshot.value.batches) {
+        if (batch.name == QStringLiteral("测试大米").toStdString()) {
+            found = true;
+
+            check(
+                approximatelyEqual(batch.totalWeightGrams, 500.0),
+                "Legacy 500 g converts to 500 grams"
+            );
+        }
+    }
+
+    check(found, "Legacy rice batch found");
+}
+        }
+
+        ConsumptionRequest request;
+request.eventId = "123e4567-e89b-42d3-a456-426614174004";
+request.completedAt = "2026-10-28 12:00:00";
+request.requirements.push_back({"测试大米", 200.0});
+
+const auto preview = service->previewConsumption(request);
+
+check(
+    preview.outcome.status == OperationStatus::Succeeded,
+    "Legacy inventory preview succeeds"
+);
+
+if (preview.outcome.status == OperationStatus::Succeeded) {
+    const auto consumed =
+        service->consumeForCooking(request, preview.previewToken);
+
+    check(
+        consumed.outcome.status == OperationStatus::Succeeded,
+        "Legacy inventory consumption succeeds"
+    );
+
+    const auto after = service->getInventoryBatches();
+
+    bool verified = false;
+
+    for (const auto& batch : after.value.batches) {
+        if (batch.name == "测试大米") {
+            verified = approximatelyEqual(
+                batch.totalWeightGrams, 300.0
+            );
+        }
+    }
+
+    check(verified, "Legacy inventory remaining weight is 300 g");
+}
+
+
+    }
+
+    // 无到期日期批次排序测试
+    {
+        InventoryManager inventory;
+
+        FoodCandidate first;
+        first.name = QStringLiteral("排序测试大米");
+        first.quantity = 100;
+        first.unit = QStringLiteral("g");
+        first.gramsPerUnit = 0;
+        first.totalWeightGrams = 100;
+
+        FoodCandidate second = first;
+
+        inventory.addFood(first);
+        inventory.addFood(second);
+
+        auto service = createInventoryService(inventory);
+
+        if (service) {
+            const auto snapshot = service->getInventoryBatches();
+
+            std::vector<long long> ids;
+
+            for (const auto& batch : snapshot.value.batches) {
+                if (batch.name == "排序测试大米") {
+                    ids.push_back(batch.batchId);
+                }
+            }
+
+            check(ids.size() == 2,
+                  "Two undated batches exist");
+
+            if (ids.size() == 2) {
+                ConsumptionRequest request;
+                request.eventId =
+                    "123e4567-e89b-42d3-a456-426614174005";
+                request.completedAt = "2026-10-28 12:00:00";
+                request.requirements.push_back(
+                    {"排序测试大米", 50.0}
+                );
+
+                const auto preview =
+                    service->previewConsumption(request);
+
+                check(
+                    preview.outcome.status ==
+                        OperationStatus::Succeeded,
+                    "Undated batch preview succeeds"
+                );
+
+                if (!preview.planned.empty()) {
+                    check(
+                        preview.planned.front().batchId ==
+                            *std::min_element(ids.begin(), ids.end()),
+                        "Undated batches use smallest ID first"
+                    );
+                } else {
+                    check(false, "Undated consumption plan exists");
+                }
+            }
+        }
+    }
 
     QDir::setCurrent(originalPath);
 

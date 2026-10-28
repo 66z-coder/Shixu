@@ -120,7 +120,27 @@ public:
             batch.unit = query.value(3).toString().toUtf8().toStdString();
             batch.expiryDate = query.value(4).toString().toStdString();
             batch.gramsPerUnit = query.value(5).toDouble();
-            batch.totalWeightGrams = query.value(6).toDouble();
+batch.totalWeightGrams = query.value(6).toDouble();
+
+if (batch.totalWeightGrams == 0) {
+    const QString unit = QString::fromStdString(batch.unit).trimmed().toLower();
+
+    double grams = 0;
+
+    if (unit == "g" || unit == "克") {
+        grams = batch.quantity;
+    } else if (unit == "kg" || unit == "千克" || unit == "公斤") {
+        grams = batch.quantity * 1000.0;
+    } else if (unit == "斤") {
+        grams = batch.quantity * 500.0;
+    } else if (unit == "mg" || unit == "毫克") {
+        grams = batch.quantity / 1000.0;
+    } else if (batch.gramsPerUnit > 0) {
+        grams = batch.quantity * batch.gramsPerUnit;
+    }
+
+    batch.totalWeightGrams = grams;
+}
 
             if (batch.batchId <= 0 ||
                 batch.name.empty() ||
@@ -571,14 +591,15 @@ bool expiresEarlier(
     const PlannedInventoryBatch& a,
     const PlannedInventoryBatch& b)
 {
-    if (!a.expiry.isValid())
-        return false;
+    const bool aValid = a.expiry.isValid();
+    const bool bValid = b.expiry.isValid();
 
-    if (!b.expiry.isValid())
-        return true;
-
-    if (a.expiry != b.expiry)
-        return a.expiry < b.expiry;
+    if (aValid && bValid) {
+        if (a.expiry != b.expiry)
+            return a.expiry < b.expiry;
+    } else if (aValid != bValid) {
+        return aValid;
+    }
 
     return a.batch.batchId < b.batch.batchId;
 }
