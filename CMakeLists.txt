@@ -16,6 +16,12 @@ add_library(ShixuRecipe STATIC
 target_include_directories(ShixuRecipe PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 if(BUILD_TESTING)
+    add_executable(ContractCompileTest tests/contracts/ContractCompileTest.cpp)
+    target_link_libraries(ContractCompileTest PRIVATE ShixuRecipe)
+    add_test(NAME ContractCompileTest COMMAND ContractCompileTest)
+    add_executable(ContractImplementationTest tests/contracts/ContractImplementationTest.cpp)
+    target_include_directories(ContractImplementationTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_test(NAME ContractImplementationTest COMMAND ContractImplementationTest)
     foreach(pair IN ITEMS "RecipeDemo|test_findRecipesByFoods" "CalculateMatchDemo|test_calculateMatch"
                           "CalculateNutritionDemo|test_calculateNutrition" "RecordMealDemo|test_recordMeal")
         string(REPLACE "|" ";" parts "${pair}")
@@ -34,6 +40,13 @@ if(QT_FOUND)
     set(CMAKE_AUTOMOC ON)
     set(CMAKE_AUTOUIC ON)
     set(CMAKE_AUTORCC ON)
+
+    if(BUILD_TESTING)
+        add_executable(QtContractCompileTest tests/contracts/QtContractCompileTest.cpp resources/recognition.qrc)
+        target_include_directories(QtContractCompileTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/src/recipe)
+        target_link_libraries(QtContractCompileTest PRIVATE ShixuRecipe ShixuRecognition Qt${QT_VERSION_MAJOR}::Core)
+        add_test(NAME QtContractCompileTest COMMAND QtContractCompileTest)
+    endif()
 
     # A: packaging-date OCR, manual entry and normalization.
     add_library(ShixuRecognition STATIC

@@ -3,6 +3,7 @@
 #include <QString>
 #include <QStringList>
 #include <vector>
+#include "contracts/CoreContracts.h"
 
 #include "model/FoodBatch.h"
 #include "model/NutritionInfo.h"
@@ -34,6 +35,9 @@ struct UserContext {
     int topK = 5;
     int servings = 1;
     double targetCaloriesPerServing = 0.0; // User supplied; <= 0 disables this factor.
+    // New V1 service requires preferences + snapshot; old recommend ignores them.
+    std::optional<Shixu::Contracts::V1::RecommendationPreferences> preferences;
+    Shixu::Contracts::V1::InventorySnapshot inventorySnapshot;
 };
 
 struct Recommendation {
@@ -54,6 +58,10 @@ struct Recommendation {
     double preparationTimeScore = 0.0;
     int preparationTimeReferenceMinutes = 0; // Independent of the selected mood.
     bool nutritionScoreAvailable = false;
+    // V1 additions; existing fields/legacy APIs stay source-compatible.
+    Shixu::Contracts::V1::CardRole role = Shixu::Contracts::V1::CardRole::Primary;
+    std::vector<Shixu::Contracts::V1::IngredientAvailability> availability;
+    QStringList reasons;
 };
 
 struct ExplainResult {

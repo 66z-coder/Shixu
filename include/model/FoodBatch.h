@@ -1,24 +1,10 @@
 #pragma once
-
 #include <string>
-
-// ============================================================================
-// 【临时最小定义，待成员 B 冻结正式版本后替换】
-//
-// FoodBatch 是 B 模块负责定义的公共类型（分工文档 §7.1：foodId, amount,
-// expireDate, source），但当前仓库中尚无任何定义。
-// C 模块阶段一按名称匹配食材，只需要读取：食材名称 + 可用数量。
-//
-// 需要组内确认的问题：
-//   1. §7.1 的字段建议中没有名称字段（只有 foodId），而 C 的匹配依赖食材名称。
-//      需要 B 在 FoodBatch 中提供名称，或提供 id -> 名称的查询接口。
-//   2. amount 的单位（克？份？）未冻结，此处暂按克处理。
-//
-// C 模块不实现任何库存功能，本结构仅供接口签名通过编译的最小可行方案。
-// ============================================================================
-struct FoodBatch
-{
-    std::string foodId;   // B 侧食材标识，C 不解释其含义
-    std::string foodName; // 食材名称（C 依赖，待 B 确认）
-    double amount = 0.0;  // 可用数量（C 依赖；暂约定为克，待 B 确认单位）
+// Legacy C matching input. amount is GRAMS, never count units.
+// Unknown-weight batches cannot be represented here; use V1 InventorySnapshot
+// and B's availability evaluation for the new workflow. This is not a DB batch ID.
+struct FoodBatch {
+    std::string foodId;   // Legacy opaque identifier; C does not interpret it.
+    std::string foodName; // A's canonical food name, UTF-8.
+    double amount = 0.0;  // Known usable grams; <=0 ignored by legacy C matching.
 };
