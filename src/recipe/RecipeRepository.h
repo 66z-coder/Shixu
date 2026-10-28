@@ -20,6 +20,9 @@ public:
     // 查询包含指定食材的菜谱下标。名称按去首尾空白后精确匹配。
     std::vector<std::size_t> findByIngredient(const std::string& foodName) const;
 
+    // 按菜谱 ID 查询；找不到返回 nullptr。
+    const Recipe* findById(int id) const;
+
 private:
     std::vector<Recipe> m_recipes;
     std::unordered_map<std::string, std::vector<std::size_t>> m_invertedIndex;

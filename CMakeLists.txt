@@ -12,6 +12,7 @@ add_library(ShixuRecipe STATIC
     src/recipe/RecipeData.cpp
     src/recipe/MealRecordStorage.cpp
     src/recipe/RecipeService.cpp
+    src/recipe/RecipeContractAdapter.cpp
 )
 target_include_directories(ShixuRecipe PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 

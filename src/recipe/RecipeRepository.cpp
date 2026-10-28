@@ -41,3 +41,13 @@ std::vector<std::size_t> RecipeRepository::findByIngredient(const std::string& f
     }
     return it->second;
 }
+
+const Recipe* RecipeRepository::findById(int id) const
+{
+    for (const Recipe& r : m_recipes) {
+        if (r.id == id) {
+            return &r;
+        }
+    }
+    return nullptr;
+}
