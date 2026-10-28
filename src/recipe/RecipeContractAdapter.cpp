@@ -17,6 +17,34 @@ const RecipeRepository& repository()
     return instance;
 }
 
+// 校验 LocalDate：必须是 YYYY-MM-DD 格式，且为真实存在的日历日期。
+// 契约（CoreContracts.h L16 / v1.md L34）规定日期为 YYYY-MM-DD；
+// 在适配器边界拦截非法参数，避免返回“成功但空结果”误导调用方。
+bool isValidLocalDate(const std::string& date)
+{
+    if (date.size() != 10) return false;
+    for (std::size_t i = 0; i < 10; ++i) {
+        if (i == 4 || i == 7) {
+            if (date[i] != '-') return false;
+        } else if (date[i] < '0' || date[i] > '9') {
+            return false;
+        }
+    }
+
+    const int year  = std::stoi(date.substr(0, 4));
+    const int month = std::stoi(date.substr(5, 2));
+    const int day   = std::stoi(date.substr(8, 2));
+
+    if (year < 1 || month < 1 || month > 12 || day < 1) return false;
+
+    static const int kDaysInMonth[12] = {31, 28, 31, 30, 31, 30,
+                                         31, 31, 30, 31, 30, 31};
+    int limit = kDaysInMonth[month - 1];
+    const bool leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+    if (month == 2 && leap) limit = 29;
+    return day <= limit;
+}
+
 } // namespace
 
 namespace Shixu::Contracts::V1 {
@@ -97,6 +125,11 @@ QueryResult<std::vector<MealRecord>> RecipeContractAdapter::getMealsByDate(
     const LocalDate& date) const
 {
     QueryResult<std::vector<MealRecord>> result;
+    if (!isValidLocalDate(date)) {
+        result.outcome = fail(ErrorCode::InvalidArgument,
+                              "Invalid date '" + date + "': expected a real calendar date in YYYY-MM-DD");
+        return result;
+    }
     MealRecordStorage::clearLastError();
     result.value = MealRecordStorage::loadByDate(date);
     const std::string err = MealRecordStorage::getLastError();
@@ -113,6 +146,11 @@ QueryResult<NutritionInfo> RecipeContractAdapter::getNutritionByDate(
     const LocalDate& date) const
 {
     QueryResult<NutritionInfo> result;
+    if (!isValidLocalDate(date)) {
+        result.outcome = fail(ErrorCode::InvalidArgument,
+                              "Invalid date '" + date + "': expected a real calendar date in YYYY-MM-DD");
+        return result;
+    }
     MealRecordStorage::clearLastError();
     result.value = MealRecordStorage::summarizeByDate(date);
     const std::string err = MealRecordStorage::getLastError();

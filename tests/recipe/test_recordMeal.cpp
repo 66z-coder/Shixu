@@ -377,8 +377,9 @@ int main()
         check(!err.empty() && err.find("InvalidData") != std::string::npos,
               "错误应含 InvalidData，实际: [" + err + "]");
 
+        // 原文件仍存在（真实检查，不再恒真）
+        check(fs::exists(p, ec), "原文件仍存在");
         // 原文件逐字节对比 — 不变
-        check(fs::equivalent(p, bak, ec) || true, "原文件仍存在");
         std::ifstream ifs1(p, std::ios::binary | std::ios::ate);
         std::ifstream ifs2(bak, std::ios::binary | std::ios::ate);
         if (ifs1 && ifs2) {
@@ -389,6 +390,9 @@ int main()
             ifs1.read(buf1.data(), s1); ifs2.read(buf2.data(), s2);
             check(buf1 == buf2, "损坏 V1 文件升级被拒绝后原文件逐字节不变");
         }
+        // Windows 下必须先关闭流才能删除文件，否则备份文件会残留在工作目录
+        ifs1.close();
+        ifs2.close();
         fs::remove(bak, ec);
     }
     removeFileIfExists(kTestPath);
