@@ -52,6 +52,39 @@ InventoryManager::InventoryManager()
             fail(query.lastError().text()); return;
         }
     }
+
+
+        if (!query.exec(
+        "CREATE TABLE IF NOT EXISTS shixu_inventory_meta ("
+        "id INTEGER PRIMARY KEY CHECK (id = 1),"
+        "revision INTEGER NOT NULL)"
+    )) {
+        fail(query.lastError().text());
+        return;
+    }
+
+    if (!query.exec(
+        "INSERT OR IGNORE INTO shixu_inventory_meta (id, revision) "
+        "VALUES (1, 0)"
+    )) {
+        fail(query.lastError().text());
+        return;
+    }
+
+
+
+        if (!query.exec(
+        "CREATE TABLE IF NOT EXISTS shixu_consumption_events ("
+        "event_id TEXT PRIMARY KEY,"
+        "request_data TEXT NOT NULL,"
+        "result_data TEXT NOT NULL)"
+    )) {
+        fail(query.lastError().text());
+        return;
+    }
+
+
+
     if (!database.commit()) fail(database.lastError().text());
 }
 
@@ -134,6 +167,29 @@ bool InventoryManager::addFoods(const QList<FoodCandidate>& foods, QString* erro
         if (!query.exec()) return rollback("保存失败：" + query.lastError().text());
         query.finish();
     }
+
+
+
+        QSqlQuery revisionQuery(database);
+
+    if (!revisionQuery.exec(
+        "UPDATE shixu_inventory_meta "
+        "SET revision = revision + 1 "
+        "WHERE id = 1"
+    )) {
+        return rollback(
+            "更新库存版本失败：" + revisionQuery.lastError().text()
+        );
+    }
+
+    if (revisionQuery.numRowsAffected() != 1) {
+        return rollback("库存版本记录不存在");
+    }
+
+
+
+
+
     if (!database.commit()) return rollback("提交失败：" + database.lastError().text());
     return true;
 }
@@ -150,7 +206,9 @@ QList<FoodCandidate> InventoryManager::getAllItems() const
     QSqlQuery query(database);
 
     if (!query.exec(
-        "SELECT name, quantity, unit, expiryDate, gramsPerUnit, totalWeightGrams FROM foods ORDER BY id"
+        "SELECT name, quantity, unit, expiryDate, gramsPerUnit, totalWeightGrams "
+        "FROM foods WHERE quantity > 0 ORDER BY id"
+
     ))
     {
         qDebug() << "Get all foods failed:"
@@ -190,7 +248,7 @@ QList<FoodCandidate> InventoryManager::getExpiredItems(
     QSqlQuery query(database);
     query.prepare(
         "SELECT name, quantity, unit, expiryDate, gramsPerUnit, totalWeightGrams "
-        "FROM foods WHERE expiryDate IS NOT NULL "
+        "FROM foods WHERE quantity > 0 AND expiryDate IS NOT NULL "
         "AND expiryDate <> '' AND expiryDate < :currentDate "
         "ORDER BY id"
     );
@@ -238,7 +296,7 @@ QList<FoodCandidate> InventoryManager::getExpiringItems(
     QSqlQuery query(database);
     query.prepare(
         "SELECT name, quantity, unit, expiryDate, gramsPerUnit, totalWeightGrams "
-        "FROM foods WHERE expiryDate IS NOT NULL "
+        "FROM foods WHERE quantity > 0 AND expiryDate IS NOT NULL "
         "AND expiryDate <> '' "
         "AND expiryDate >= :currentDate "
         "AND expiryDate <= :endDate "

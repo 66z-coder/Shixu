@@ -8,6 +8,11 @@
 
 #include "model/FoodCandidate.h"
 
+namespace Shixu::Contracts::V1 {
+    class InventoryContractAdapter;
+}
+
+
 class InventoryManager
 {
 public:
@@ -28,6 +33,8 @@ public:
         int days = 3) const;
 
 private:
+    friend class Shixu::Contracts::V1::InventoryContractAdapter;
+
     QSqlDatabase database;
     QString initializationError_;
 };
