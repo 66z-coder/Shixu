@@ -1176,6 +1176,25 @@ InventoryContractAdapter::consumeForCooking(
         batch.gramsPerUnit = batchQuery.value(5).toDouble();
         batch.totalWeightGrams = batchQuery.value(6).toDouble();
 
+        if (batch.totalWeightGrams == 0) {
+    const QString unit =
+        QString::fromStdString(batch.unit).trimmed().toLower();
+
+    if (unit == "g" || unit == "克") {
+        batch.totalWeightGrams = batch.quantity;
+    } else if (unit == "kg" || unit == "千克" ||
+               unit == "公斤") {
+        batch.totalWeightGrams = batch.quantity * 1000.0;
+    } else if (unit == "斤") {
+        batch.totalWeightGrams = batch.quantity * 500.0;
+    } else if (unit == "mg" || unit == "毫克") {
+        batch.totalWeightGrams = batch.quantity / 1000.0;
+    } else if (batch.gramsPerUnit > 0) {
+        batch.totalWeightGrams =
+            batch.quantity * batch.gramsPerUnit;
+    }
+}
+
         currentBatches.append(batch);
     }
 
@@ -1329,7 +1348,9 @@ InventoryContractAdapter::consumeForCooking(
         "totalWeightGrams = :weight "
         "WHERE id = :id "
         "AND quantity = :oldQuantity "
-        "AND totalWeightGrams = :oldWeight"
+        "AND (totalWeightGrams = :oldWeight OR "
+"(totalWeightGrams = 0 AND :oldWeight > 0))"
+        
     )) {
         return rollback(
             OperationStatus::Failed,

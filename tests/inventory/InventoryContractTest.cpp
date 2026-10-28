@@ -8,6 +8,10 @@
 #include <QTemporaryDir>
 #include <QDebug>
 
+#include <QSqlQuery>
+#include <QSqlDatabase>
+
+
 #include <algorithm>
 
 #include <cmath>
@@ -332,18 +336,26 @@ int main(int argc, char* argv[])
 
         inventory.addFood(rice);
 
+        QSqlDatabase db =
+    QSqlDatabase::database("ShixuInventoryConnection");
+
+QSqlQuery legacyQuery(db);
+
+check(
+    legacyQuery.exec(
+        "UPDATE foods SET totalWeightGrams = 0 "
+        "WHERE name = '测试大米'"
+    ),
+    "Simulate legacy inventory with zero stored weight"
+);
+
         auto service = createInventoryService(inventory);
 
         if (service) {
             const auto snapshot = service->getInventoryBatches();
 
             for (const auto& batch : snapshot.value.batches) {
-    qInfo() << "Legacy batch:"
-            << QString::fromStdString(batch.name)
-            << "quantity:" << batch.quantity
-            << "unit:" << QString::fromStdString(batch.unit)
-            << "gramsPerUnit:" << batch.gramsPerUnit
-            << "totalWeightGrams:" << batch.totalWeightGrams;
+    
 }
 
             check(
