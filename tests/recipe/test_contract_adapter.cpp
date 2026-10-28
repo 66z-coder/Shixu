@@ -1,8 +1,11 @@
 // C 模块：IRecipeService + createRecipeService 适配器验证
 // 所有数据文件放在系统临时目录，测试结束清理；不触碰仓库内任何文件。
+#include <cstdio>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <string>
+#include <vector>
 
 #include "contracts/CoreContracts.h"
 #include "contracts/ServiceFactories.h"
@@ -115,6 +118,7 @@ int main()
         req.record.servings = 1;
         req.record.time = "2026-10-28 12:00:00";
         req.record.date = "2026-10-28";
+        req.record.nutrition = NutritionInfo{256.0, 21.75, 12.2, 13.6};
         auto r = service->recordMealOnce(req);
         check(r.outcome.status == OperationStatus::Succeeded, "正常写入 Succeeded");
         check(r.savedRecord.has_value(), "savedRecord 有值");
@@ -131,6 +135,7 @@ int main()
         req.record.servings = 1;
         req.record.time = "2026-10-28 12:00:00";
         req.record.date = "2026-10-28";
+        req.record.nutrition = NutritionInfo{256.0, 21.75, 12.2, 13.6};
         auto r = service->recordMealOnce(req);
         check(r.outcome.status == OperationStatus::AlreadyApplied, "重复提交 AlreadyApplied");
         auto meals = service->getMealsByDate("2026-10-28");
@@ -143,15 +148,16 @@ int main()
         req.eventId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
         req.record.recipeId = 1;
         req.record.recipeName = "番茄炒蛋";
-        req.record.servings = 5;  // 与已保存内容不同
+        req.record.servings = 1;
         req.record.time = "2026-10-28 12:00:00";
         req.record.date = "2026-10-28";
+        req.record.nutrition = NutritionInfo{512.0, 21.75, 12.2, 13.6};  // 营养与已保存不同
         auto r = service->recordMealOnce(req);
         check(r.outcome.status == OperationStatus::Failed, "冲突提交 Failed");
         check(r.outcome.errorCode == ErrorCode::EventConflict, "冲突提交 EventConflict");
         auto meals = service->getMealsByDate("2026-10-28");
         check(meals.value.size() == 1, "冲突后记录数仍为 1");
-        check(meals.value.size() == 1 && meals.value[0].servings == 1,
+        check(meals.value.size() == 1 && meals.value[0].nutrition.calories == 256.0,
               "冲突后原记录内容未被覆盖");
     }
 
@@ -166,11 +172,134 @@ int main()
         req.record.servings = 1;
         req.record.time = "2026-10-28 12:00:00";
         req.record.date = "2026-10-28";
+        req.record.nutrition = NutritionInfo{256.0, 21.75, 12.2, 13.6};
         auto r = service->recordMealOnce(req);
         check(r.outcome.status == OperationStatus::AlreadyApplied, "重启后仍识别重复事件");
     }
 
-    // 12. 旧自由函数回归
+    // 12. 饮食记录输入校验：非法请求必须 Failed + InvalidArgument 且不落盘
+    {
+        const double nan  = std::numeric_limits<double>::quiet_NaN();
+        const double inf  = std::numeric_limits<double>::infinity();
+
+        // 契约规定 eventId 为小写、无花括号 UUID，因此所有"字段非法"用例都必须
+        // 携带合法 UUID，否则失败原因会被事件 ID 校验抢先命中，掩盖真正的断言目标。
+        auto uuidOf = [](int n) {
+            char buf[37] = {0};
+            std::snprintf(buf, sizeof(buf), "00000000-0000-4000-8000-%012d", n);
+            return std::string(buf);
+        };
+
+        auto makeValid = [](const std::string& eventId) {
+            MealWriteRequest req;
+            req.eventId = eventId;
+            req.record.recipeId = 1;
+            req.record.recipeName = "番茄炒蛋";
+            req.record.servings = 1;
+            req.record.time = "2026-10-28 12:00:00";
+            req.record.date = "2026-10-28";
+            req.record.nutrition = NutritionInfo{100.0, 10.0, 10.0, 10.0};
+            return req;
+        };
+
+        struct BadCase {
+            std::string name;
+            MealWriteRequest req;
+        };
+        std::vector<BadCase> bad;
+
+        { auto q = makeValid(uuidOf(101));  q.record.nutrition.calories = -100.0; bad.push_back({"负 calories", q}); }
+        { auto q = makeValid(uuidOf(102));  q.record.nutrition.protein = -1.0;   bad.push_back({"负 protein", q}); }
+        { auto q = makeValid(uuidOf(103));  q.record.nutrition.carbohydrates = -0.5; bad.push_back({"负 carbohydrates", q}); }
+        { auto q = makeValid(uuidOf(104));  q.record.nutrition.fat = -0.1;      bad.push_back({"负 fat", q}); }
+        { auto q = makeValid(uuidOf(105));  q.record.nutrition.calories = nan;  bad.push_back({"NaN calories", q}); }
+        { auto q = makeValid(uuidOf(106));  q.record.nutrition.protein = nan;   bad.push_back({"NaN protein", q}); }
+        { auto q = makeValid(uuidOf(107));  q.record.nutrition.calories = inf;  bad.push_back({"+Inf calories", q}); }
+        { auto q = makeValid(uuidOf(108));  q.record.nutrition.fat = -inf;      bad.push_back({"-Inf fat", q}); }
+        { auto q = makeValid(uuidOf(109));  q.record.recipeId = 0;              bad.push_back({"菜谱 ID = 0", q}); }
+        { auto q = makeValid(uuidOf(110));  q.record.recipeId = -3;             bad.push_back({"菜谱 ID < 0", q}); }
+        { auto q = makeValid(uuidOf(111));  q.record.servings = 0;              bad.push_back({"servings = 0", q}); }
+        { auto q = makeValid(uuidOf(112));  q.record.servings = 2;              bad.push_back({"servings = 2", q}); }
+        { auto q = makeValid(uuidOf(113));  q.record.time = "2026/10/28 12:00:00"; bad.push_back({"非法 time", q}); }
+        { auto q = makeValid(uuidOf(114));  q.record.time = "2026-02-30 12:00:00"; bad.push_back({"不存在的 time", q}); }
+        { auto q = makeValid(uuidOf(115));  q.record.date = "2026-13-40";       bad.push_back({"非法 date", q}); }
+
+        // eventId 格式：契约要求小写 UUID、无花括号
+        { auto q = makeValid("");                                          bad.push_back({"空 eventId", q}); }
+        { auto q = makeValid("   ");                                       bad.push_back({"空白 eventId", q}); }
+        { auto q = makeValid(std::string("bad\ncntrl-0000-0000-000000000000")); bad.push_back({"含控制字符的 eventId", q}); }
+        { auto q = makeValid("AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA");      bad.push_back({"大写 UUID", q}); }
+        { auto q = makeValid("{aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}");    bad.push_back({"带花括号 UUID", q}); }
+        { auto q = makeValid("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa");       bad.push_back({"35 位 UUID", q}); }
+        { auto q = makeValid("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaaa");     bad.push_back({"37 位 UUID", q}); }
+        { auto q = makeValid("gggggggg-gggg-gggg-gggg-gggggggggggg");      bad.push_back({"非十六进制 UUID", q}); }
+        { auto q = makeValid("aaaaaaaaa-aaa-aaaa-aaaa-aaaaaaaaaaaa");      bad.push_back({"连字符位置错误", q}); }
+        { auto q = makeValid("aaaaaaaa_aaaa_aaaa_aaaa_aaaaaaaaaaaa");      bad.push_back({"下划线分隔", q}); }
+
+        // 合法形式必须被接受：小写十六进制、8-4-4-4-12、无花括号
+        {
+            auto q = makeValid("deadbeef-1234-4abc-8def-0123456789ab");
+            q.record.time = "2026-10-26 09:00:00";
+            q.record.date = "2026-10-26";
+            auto r = service->recordMealOnce(q);
+            check(r.outcome.status == OperationStatus::Succeeded, "合法小写 UUID 被接受");
+            check(r.savedRecord.has_value()
+                  && r.savedRecord->eventId == "deadbeef-1234-4abc-8def-0123456789ab",
+                  "合法 UUID 原样持久化并回传");
+        }
+
+        for (const auto& bc : bad) {
+            auto r = service->recordMealOnce(bc.req);
+            check(r.outcome.status == OperationStatus::Failed,
+                  bc.name + " → Failed");
+            check(r.outcome.errorCode == ErrorCode::InvalidArgument,
+                  bc.name + " → InvalidArgument");
+            check(!r.savedRecord.has_value(), bc.name + " → 不返回 savedRecord");
+        }
+
+        // 非法请求不得污染持久化文件与日统计
+        auto meals = service->getMealsByDate("2026-10-28");
+        check(meals.value.size() == 1, "非法请求后记录数仍为 1");
+        auto sum = service->getNutritionByDate("2026-10-28");
+        check(sum.outcome.status == OperationStatus::Succeeded, "非法请求后统计仍可读");
+        check(sum.value.calories == 256.0, "非法请求未影响日热量统计（仍为 256）");
+        check(sum.value.protein == 21.75, "非法请求未影响蛋白质统计（仍为 21.75）");
+
+        // 同一非法请求重试：必须仍是 InvalidArgument，不能变成 EventConflict
+        {
+            auto q = makeValid(uuidOf(201));
+            q.record.nutrition.calories = nan;
+            auto first = service->recordMealOnce(q);
+            auto second = service->recordMealOnce(q);
+            check(first.outcome.errorCode == ErrorCode::InvalidArgument, "首次 NaN 请求 InvalidArgument");
+            check(second.outcome.errorCode == ErrorCode::InvalidArgument,
+                  "NaN 请求重试仍 InvalidArgument（不产生 EventConflict）");
+        }
+        {
+            auto q = makeValid(uuidOf(202));
+            q.record.nutrition.calories = -100.0;
+            auto first = service->recordMealOnce(q);
+            auto second = service->recordMealOnce(q);
+            check(first.outcome.errorCode == ErrorCode::InvalidArgument, "首次负热量请求 InvalidArgument");
+            check(second.outcome.errorCode == ErrorCode::InvalidArgument,
+                  "负热量请求重试仍 InvalidArgument");
+        }
+
+        // 合法请求仍然可保存（含全 0 营养），且不影响既有记录
+        {
+            auto q = makeValid(uuidOf(301));
+            q.record.time = "2026-10-27 08:00:00";
+            q.record.date = "2026-10-27";
+            q.record.nutrition = NutritionInfo{0.0, 0.0, 0.0, 0.0};
+            auto r = service->recordMealOnce(q);
+            check(r.outcome.status == OperationStatus::Succeeded, "合法零营养请求仍可保存");
+            check(r.savedRecord.has_value(), "合法零营养请求返回 savedRecord");
+            check(service->recordMealOnce(q).outcome.status == OperationStatus::AlreadyApplied,
+                  "合法零营养请求重复提交仍 AlreadyApplied");
+        }
+    }
+
+    // 13. 旧自由函数回归
     {
         std::vector<FoodBatch> empty;
         auto r = findRecipesByFoods(empty);

@@ -15,6 +15,11 @@ add_library(ShixuRecipe STATIC
     src/recipe/RecipeContractAdapter.cpp
 )
 target_include_directories(ShixuRecipe PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+if(MSVC)
+    # 仓库源码为无 BOM 的 UTF-8；MSVC 默认按本地代码页(936)解析会破坏中文字面量，
+    # 导致 RecipeData 等文件编译失败。PUBLIC 使所有链接 ShixuRecipe 的 C 模块测试继承。
+    target_compile_options(ShixuRecipe PUBLIC /utf-8)
+endif()
 
 if(BUILD_TESTING)
     add_executable(ContractCompileTest tests/contracts/ContractCompileTest.cpp)
@@ -22,9 +27,15 @@ if(BUILD_TESTING)
     add_test(NAME ContractCompileTest COMMAND ContractCompileTest)
     add_executable(ContractImplementationTest tests/contracts/ContractImplementationTest.cpp)
     target_include_directories(ContractImplementationTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    if(MSVC)
+        # 该目标不链接 ShixuRecipe，无法继承上面的 PUBLIC /utf-8；
+        # 契约夹具含中文字面量，必须单独声明，否则按代码页 936 解析会编译失败。
+        target_compile_options(ContractImplementationTest PRIVATE /utf-8)
+    endif()
     add_test(NAME ContractImplementationTest COMMAND ContractImplementationTest)
     foreach(pair IN ITEMS "RecipeDemo|test_findRecipesByFoods" "CalculateMatchDemo|test_calculateMatch"
-                          "CalculateNutritionDemo|test_calculateNutrition" "RecordMealDemo|test_recordMeal")
+                          "CalculateNutritionDemo|test_calculateNutrition" "RecordMealDemo|test_recordMeal"
+                          "ContractAdapterTest|test_contract_adapter")
         string(REPLACE "|" ";" parts "${pair}")
         list(GET parts 0 target_name)
         list(GET parts 1 test_source)

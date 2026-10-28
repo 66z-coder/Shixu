@@ -338,6 +338,111 @@ std::vector<MealRecord> loadAllStrict(const std::string& path, std::string& errO
     return result;
 }
 
+// ----- recordMealOnce 输入校验 -----
+// 契约（v1.md L123 / CoreContracts.h L14-17）：
+//   recipeId > 0；V1 只接受 servings = 1；time 为 "YYYY-MM-DD HH:mm:ss"；
+//   date 为 YYYY-MM-DD；营养四项必须有限且非负。
+// 校验只作用于新接口 recordMealOnce，旧 append/recordMeal 行为保持不变。
+bool isRealCalendarDate(int year, int month, int day)
+{
+    if (year < 1 || month < 1 || month > 12 || day < 1) return false;
+    static const int kDaysInMonth[12] = {31, 28, 31, 30, 31, 30,
+                                         31, 31, 30, 31, 30, 31};
+    int limit = kDaysInMonth[month - 1];
+    const bool leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+    if (month == 2 && leap) limit = 29;
+    return day <= limit;
+}
+
+bool isAllDigits(const std::string& s, std::size_t pos, std::size_t len)
+{
+    for (std::size_t i = pos; i < pos + len; ++i) {
+        if (s[i] < '0' || s[i] > '9') return false;
+    }
+    return true;
+}
+
+// YYYY-MM-DD
+bool isValidDateText(const std::string& s)
+{
+    if (s.size() != 10 || s[4] != '-' || s[7] != '-') return false;
+    if (!isAllDigits(s, 0, 4) || !isAllDigits(s, 5, 2) || !isAllDigits(s, 8, 2)) return false;
+    return isRealCalendarDate(std::stoi(s.substr(0, 4)),
+                              std::stoi(s.substr(5, 2)),
+                              std::stoi(s.substr(8, 2)));
+}
+
+// YYYY-MM-DD HH:mm:ss
+bool isValidDateTimeText(const std::string& s)
+{
+    if (s.size() != 19 || s[4] != '-' || s[7] != '-' || s[10] != ' '
+        || s[13] != ':' || s[16] != ':') {
+        return false;
+    }
+    if (!isAllDigits(s, 0, 4) || !isAllDigits(s, 5, 2) || !isAllDigits(s, 8, 2)
+        || !isAllDigits(s, 11, 2) || !isAllDigits(s, 14, 2) || !isAllDigits(s, 17, 2)) {
+        return false;
+    }
+    if (!isRealCalendarDate(std::stoi(s.substr(0, 4)),
+                            std::stoi(s.substr(5, 2)),
+                            std::stoi(s.substr(8, 2)))) {
+        return false;
+    }
+    const int hour   = std::stoi(s.substr(11, 2));
+    const int minute = std::stoi(s.substr(14, 2));
+    const int second = std::stoi(s.substr(17, 2));
+    return hour <= 23 && minute <= 59 && second <= 59;
+}
+
+// 事件 ID：契约（CoreContracts.h L15 / v1.md L36）要求为小写、无花括号的 UUID，
+// 即 8-4-4-4-12 位小写十六进制，例如 5f778a96-91c7-4e42-a5ae-d7ad189d6101。
+// 存储层与契约适配器保持同一口径，非法 ID 在写入前直接拒绝。
+bool isValidEventIdText(const std::string& s)
+{
+    if (s.size() != 36) return false;
+    for (std::size_t i = 0; i < 36; ++i) {
+        if (i == 8 || i == 13 || i == 18 || i == 23) {
+            if (s[i] != '-') return false;
+        } else {
+            const unsigned char c = static_cast<unsigned char>(s[i]);
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+        }
+    }
+    return true;
+}
+
+// 返回空字符串表示通过；否则返回以 "InvalidArgument: " 开头的说明。
+std::string validateMealRecordInput(const MealRecord& r)
+{
+    if (r.recipeId <= 0) {
+        return "InvalidArgument: 菜谱 ID 必须大于 0，实际=" + std::to_string(r.recipeId);
+    }
+    if (r.servings != 1) {
+        return "InvalidArgument: V1 仅接受 servings = 1，实际=" + std::to_string(r.servings);
+    }
+    if (!isValidDateTimeText(r.time)) {
+        return "InvalidArgument: time 必须是 YYYY-MM-DD HH:mm:ss，实际=[" + r.time + "]";
+    }
+    if (!r.date.empty() && !isValidDateText(r.date)) {
+        return "InvalidArgument: date 必须是 YYYY-MM-DD，实际=[" + r.date + "]";
+    }
+
+    const double values[4] = {r.nutrition.calories, r.nutrition.protein,
+                              r.nutrition.carbohydrates, r.nutrition.fat};
+    static const char* const kNames[4] = {"calories", "protein", "carbohydrates", "fat"};
+    for (int i = 0; i < 4; ++i) {
+        if (!std::isfinite(values[i])) {
+            return std::string("InvalidArgument: 营养字段 ") + kNames[i]
+                   + " 必须是有限数值（拒绝 NaN / Inf）";
+        }
+        if (values[i] < 0.0) {
+            return std::string("InvalidArgument: 营养字段 ") + kNames[i]
+                   + " 不能为负，实际=" + std::to_string(values[i]);
+        }
+    }
+    return {};
+}
+
 // ----- 幂等比较 -----
 bool recordsEqualIgnoringEvent(const MealRecord& a, const MealRecord& b)
 {
@@ -471,6 +576,25 @@ IdempotentResult recordMealOnce(const std::string& eventId, const MealRecord& re
         result.outcome.errorCode = ErrorCode::InvalidArgument;
         result.outcome.message = "recordMealOnce: eventId 不能为空（旧 recordMeal() 自由函数不参与幂等）";
         return result;
+    }
+
+    if (!isValidEventIdText(eventId)) {
+        result.outcome.status = OperationStatus::Failed;
+        result.outcome.errorCode = ErrorCode::InvalidArgument;
+        result.outcome.message = "InvalidArgument: eventId 必须是 8-4-4-4-12 的小写十六进制 UUID（无花括号）";
+        return result;
+    }
+
+    // 先校验整条记录，再读文件、比较与写入：
+    // 非法请求不会写入持久化文件，也不会进入幂等比较（避免 NaN 自重试被误判为 EventConflict）。
+    {
+        const std::string invalid = validateMealRecordInput(recordIn);
+        if (!invalid.empty()) {
+            result.outcome.status = OperationStatus::Failed;
+            result.outcome.errorCode = ErrorCode::InvalidArgument;
+            result.outcome.message = invalid;
+            return result;
+        }
     }
 
     // 独立 date 字段：如果调用方没填，从 time 提取

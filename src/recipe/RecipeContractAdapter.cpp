@@ -45,6 +45,22 @@ bool isValidLocalDate(const std::string& date)
     return day <= limit;
 }
 
+// 校验 EventId：契约（CoreContracts.h L15 / v1.md L37）规定为小写、无花括号 UUID。
+// 严格校验 8-4-4-4-12 的十六进制小写形式；在适配器边界拦截，避免非法事件 ID
+// 进入存储层参与幂等比较（会让同一非法请求重试时产生错误的事件冲突）。
+bool isValidEventId(const std::string& id)
+{
+    if (id.size() != 36) return false;
+    for (std::size_t i = 0; i < 36; ++i) {
+        if (i == 8 || i == 13 || i == 18 || i == 23) {
+            if (id[i] != '-') return false;
+        } else if (!((id[i] >= '0' && id[i] <= '9') || (id[i] >= 'a' && id[i] <= 'f'))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 namespace Shixu::Contracts::V1 {
@@ -178,6 +194,14 @@ MealWriteResult RecipeContractAdapter::recordMealOnce(
 {
     MealWriteResult result;
     result.eventId = request.eventId;
+
+    // 契约要求事件 ID 为小写 UUID（无花括号）；非法值在进入存储层前直接拒绝，
+    // 避免其参与幂等比较后同一非法请求重试被误报为 EventConflict。
+    if (!isValidEventId(request.eventId)) {
+        result.outcome = fail(ErrorCode::InvalidArgument,
+                              "InvalidArgument: eventId 必须是 8-4-4-4-12 的小写十六进制 UUID（无花括号）");
+        return result;
+    }
 
     MealRecordStorage::clearLastError();
     const auto storageResult = MealRecordStorage::recordMealOnce(
