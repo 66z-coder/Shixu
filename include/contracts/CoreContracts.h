@@ -1,5 +1,5 @@
 #pragma once
-// V1 proposal: declarations only. Implementations arrive in member PRs.
+// V1 reviewed contract: declarations only. Implementations arrive in member PRs.
 // Normative rules: docs/contracts/v1.md. No Qt dependency in this header.
 #include <cstdint>
 #include <optional>
@@ -19,11 +19,11 @@ using LocalDateTime = std::string; // YYYY-MM-DD HH:mm:ss, Asia/Shanghai.
 enum class OperationStatus { Succeeded, AlreadyApplied, NeedsConfirmation, Failed };
 enum class ErrorCode {
     None, InvalidArgument, NotFound, StorageFailure, EventConflict,
-    InventoryChanged, UnconfirmedIngredients, InvalidData
+    InventoryChanged, UnconfirmedIngredients, InvalidData, InvalidState
 };
 struct OperationResult {
     OperationStatus status = OperationStatus::Failed;
-    ErrorCode errorCode = ErrorCode::None;
+    ErrorCode errorCode = ErrorCode::InvalidState;
     std::string message; // UTF-8, user-facing; never branch on this string.
 };
 template<class T> struct QueryResult {
@@ -99,6 +99,8 @@ public:
     virtual QueryResult<InventorySnapshot> getInventoryBatches() const = 0;
     virtual QueryResult<std::vector<IngredientAvailability>> evaluateRequirements(
         const EvaluationRequest&) const = 0;
+    // Read committed event before checking stale preview tokens; NotFound means no commit.
+    virtual QueryResult<ConsumptionResult> getConsumption(const EventId&) const = 0;
     virtual ConsumptionPreview previewConsumption(const ConsumptionRequest&) const = 0;
     virtual ConsumptionResult consumeForCooking(
         const ConsumptionRequest&, const std::string& previewToken) = 0;
@@ -165,10 +167,21 @@ struct CookingRewardResult {
     int totalPoints = 0;
     std::vector<std::string> newlyUnlockedAchievements;
 };
+struct GrowthSnapshot {
+    int totalCookingCount = 0;
+    int totalCheckIns = 0;
+    int totalPoints = 0;
+    int currentStreak = 0;
+    int bestStreak = 0;
+    bool checkedInOnReferenceDate = false;
+    std::vector<std::string> unlockedAchievements;
+    std::vector<LocalDate> recentCheckInDates; // Latest 7 check-in dates, descending.
+};
 class IRewardService {
 public:
     virtual ~IRewardService() = default;
     virtual CookingRewardResult applyCookingRewardOnce(const CookingRewardRequest&) = 0;
+    virtual QueryResult<GrowthSnapshot> getGrowthSnapshot(const LocalDate& referenceDate) const = 0;
 };
 
 struct CookingCompletionRequest {
@@ -184,7 +197,7 @@ struct CookingSnapshot {
     std::vector<IngredientRequirement> requirements;
     NutritionInfo nutrition; // Total for request.servings; calculated by existing C formula.
 };
-enum class CompletionStage { NotStarted, Prepared, InventorySaved, MealSaved, RewardSaved, Completed };
+enum class CompletionStage { NotStarted, Prepared, InventorySaved, MealSaved, RewardSaved, Completed, Cancelled };
 struct CookingCompletionPreview {
     OperationResult outcome;
     std::string confirmationToken; // Opaque coordinator token binds frozen snapshot + B preview.
@@ -199,6 +212,10 @@ struct CookingCompletionResult {
     std::optional<MealWriteResult> meal;
     std::optional<CookingRewardResult> reward;
 };
+struct CookingCompletionDetails {
+    CookingSnapshot snapshot;
+    CookingCompletionResult progress;
+};
 class ICookingCompletionService {
 public:
     virtual ~ICookingCompletionService() = default;
@@ -206,6 +223,9 @@ public:
     virtual CookingCompletionResult completeCooking(
         const CookingCompletionRequest&, const std::string& confirmationToken) = 0;
     virtual CookingCompletionResult retryCompletion(const EventId&) = 0;
+    virtual QueryResult<CookingCompletionDetails> getCompletion(const EventId&) const = 0;
+    // Only before B committed; retain cancellation tombstone, never undo a consumed event.
+    virtual CookingCompletionResult cancelPreparedCompletion(const EventId&) = 0;
     virtual QueryResult<std::vector<CookingCompletionResult>> getPendingCompletions() const = 0;
 };
 } // namespace Shixu::Contracts::V1

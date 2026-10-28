@@ -1,6 +1,6 @@
 # 固定联调样例
 
-本 PR 的 ContractCompileTest / QtContractCompileTest 只检查类型、现有 C 公式兼容及样例自洽，**不表示下列新业务已实现**。
+本 PR 的 ContractCompileTest / ContractImplementationTest / QtContractCompileTest 只检查类型、服务签名可实现性、现有 C 公式及 A/C 名称兼容、样例自洽，**不表示下列新业务已实现**。
 业务验收由对应成员后续 PR 实现真实服务测试；不得用样例硬编码返回值代替服务。
 [ContractFixtures.h](../../tests/contracts/ContractFixtures.h) 可供大家建立 mock；其中9001是合成菜谱ID，不加入正式菜谱库，营养值仅是计算测试数据。
 
@@ -60,4 +60,22 @@ cmake --build build-contracts-noqt
 ctest --test-dir build-contracts-noqt --output-on-failure
 ```
 
-按本机编译器补充 -G 和工具路径。无Qt应包含原C的4个测试和ContractCompileTest；Qt完整构建应保留原14个测试并增加2个契约测试。
+按本机编译器补充 -G 和工具路径。无Qt包含原C的4个测试及2个契约测试，共6项；Qt完整构建保留原14个测试并增加3个契约测试，共17项。
+
+
+## 技术审查新增验收项
+
+| 编号/负责人 | 输入/操作 | 必须验证的实际结果 |
+|---|---|---|
+| B12 B | 一批全部用完后读取新旧库存、首页临期查询 | quantity=0/weight=0，不继续显示为库存或Unknown |
+| B13 B | getConsumption查询已有、不存在、数据库失败 | 已有原结果；NotFound；StorageFailure，三者不得混淆 |
+| B14 B | addFoods后持旧revision预览令牌执行 | 版本同事务更新，原令牌失效；失败入库不推进版本 |
+| C04 C | 高精度营养/中文路径/菜名含管道和换行，保存重启 | 可读取原内容，同事件重试不因精度或转义而冲突 |
+| D05 D/E | 库存查询失败；只有未知重量；新偏好与旧mood矛盾 | 错误明确；未知不丢；新服务以preferences为唯一条件 |
+| E03 E | 手动打卡后做饭以及反向顺序 | 每日5分只一次，原points()与GrowthSnapshot一致 |
+| E04 E | 第二次做饭后重放第一事件，再查成长数据 | 原事件仍返回原奖励快照，实时总次数/总积分从getGrowthSnapshot获取 |
+| I07 集成/E | 重启后打开Pending事件，获取详情 | getCompletion返回原请求、配方、营养、时间和真实进度，可重新预览 |
+| I08 集成/B | Prepared后缺口变化，取消后重新确认；另测B已扣减或读取失败 | 仅明确未扣减可取消；Cancelled不再重试，不删除旧ID；另两种情况拒绝取消 |
+| I09 集成/E | 重启丢失预览令牌但B未扣减 | 需要明确重新确认，禁止后台刷新令牌后自动扣减 |
+
+联调计数仍区分契约测试和业务测试。成员不需要新增业务功能才能运行本PR的编译样例；构造函数只声明，由各业务PR实现，组长在主程序接线时再链接它们。
