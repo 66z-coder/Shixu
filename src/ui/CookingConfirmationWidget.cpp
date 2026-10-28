@@ -49,6 +49,11 @@ void CookingConfirmationWidget::setPreview(const Shixu::Contracts::V1::CookingCo
     m_request = preview.snapshot.request;
     m_token = preview.outcome.status == V::OperationStatus::Succeeded
         ? text(preview.confirmationToken) : QString();
+    // A fresh successful preview replaces the previous retry state.
+    if (!m_token.isEmpty()) {
+        m_retry->hide();
+        m_cancelPrepared->hide();
+    }
     m_title->setText(QStringLiteral("确认做完：%1 · %2 份")
         .arg(text(preview.snapshot.recipe.name)).arg(m_request.servings));
     m_status->setText(preview.outcome.status == V::OperationStatus::Succeeded
@@ -75,7 +80,7 @@ void CookingConfirmationWidget::setPreview(const Shixu::Contracts::V1::CookingCo
             emit previewRequested(m_request);
         });
     }
-    m_confirm->setEnabled(!m_busy && !m_token.isEmpty());
+    setBusy(m_busy);
 }
 void CookingConfirmationWidget::setProgress(const Shixu::Contracts::V1::CookingCompletionResult& result)
 {

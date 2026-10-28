@@ -49,8 +49,23 @@ int main(int argc, char** argv)
     preview.confirmationToken = "opaque"; preview.snapshot.recipe = card.recipe;
     preview.snapshot.request.eventId = "5f778a96-91c7-4e42-a5ae-d7ad189d6105";
     preview.snapshot.request.recipeId = 12; preview.snapshot.request.servings = 1;
+    V::CookingCompletionResult pending;
+    pending.eventId = preview.snapshot.request.eventId;
+    pending.stage = V::CompletionStage::Prepared;
+    pending.outcome = {V::OperationStatus::NeedsConfirmation, V::ErrorCode::InventoryChanged, "Re-preview needed"};
+    confirmation.setProgress(pending);
+    confirmation.setBusy(false);
+    QPushButton* retry = nullptr;
+    QPushButton* confirm = nullptr;
+    for (auto* button : confirmation.findChildren<QPushButton*>()) {
+        if (button->text() == QStringLiteral("继续完成未结算步骤")) retry = button;
+        if (button->text() == QStringLiteral("确认完成并记录")) confirm = button;
+    }
+    if (!retry || retry->isHidden() || !confirm || confirm->isEnabled()) return 6;
     confirmation.setPreview(preview);
-    for (auto* button : confirmation.findChildren<QPushButton*>()) if (button->text() == QStringLiteral("确认完成并记录")) button->click();
-    if (completions != 1) return 6;
+    confirmation.setBusy(false);
+    if (!retry->isHidden() || !confirm->isEnabled()) return 7;
+    confirm->click();
+    if (completions != 1) return 8;
     return 0;
 }

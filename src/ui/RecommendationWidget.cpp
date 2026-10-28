@@ -6,6 +6,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLayoutItem>
+#include <QMetaMethod>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScrollArea>
@@ -18,6 +19,20 @@
 namespace {
 
 using Mood = Shixu::RecommendationEngine::Mood;
+
+// Map only for the old MainWindow route; V1 service uses the five-choice enum directly.
+Mood legacyMood(Shixu::Contracts::V1::Mood mood)
+{
+    using New = Shixu::Contracts::V1::Mood;
+    switch (mood) {
+    case New::Tired: return Mood::Tired;
+    case New::WantGoodFood:
+    case New::TreatMyself: return Mood::ReadyToCook;
+    case New::LowAppetite:
+    case New::WantLight: return Mood::Neutral;
+    default: return Mood::NotSelected;
+    }
+}
 
 QLabel* makeLabel(const QString& text, const QString& objectName, QWidget* parent)
 {
@@ -179,6 +194,8 @@ RecommendationWidget::RecommendationWidget(QWidget* parent)
         moodRow->addWidget(button, 1);
         connect(button, &QPushButton::clicked, this, [this, choice] {
             selectMoodV1(choice.mood);
+            if (!isSignalConnected(QMetaMethod::fromSignal(&RecommendationWidget::moodSelectedV1)))
+                emit moodSelected(legacyMood(choice.mood));
             emit moodSelectedV1(choice.mood);
         });
     }
@@ -473,6 +490,9 @@ void RecommendationWidget::sendV1Request()
     preferences.excludedRecipeIds = m_excludedIds;
     preferences.servings = 1;
     preferences.referenceDate = QDate::currentDate().toString(Qt::ISODate).toStdString();
+    if (!isSignalConnected(QMetaMethod::fromSignal(
+            &RecommendationWidget::recommendationRequestedV1)))
+        emit recommendationRequested(legacyMood(m_moodV1), preferences.maxPreparationMinutes);
     emit recommendationRequestedV1(preferences);
 }
 

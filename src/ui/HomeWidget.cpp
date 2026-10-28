@@ -8,6 +8,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
+#include <QMetaMethod>
 #include <QPaintEvent>
 #include <QPainter>
 #include <QPainterPath>
@@ -23,6 +24,21 @@
 #include <vector>
 
 namespace {
+
+// Temporary bridge while MainWindow still listens to the three-choice signals.
+Shixu::RecommendationEngine::Mood legacyMood(Shixu::Contracts::V1::Mood mood)
+{
+    using New = Shixu::Contracts::V1::Mood;
+    using Old = Shixu::RecommendationEngine::Mood;
+    switch (mood) {
+    case New::Tired: return Old::Tired;
+    case New::WantGoodFood:
+    case New::TreatMyself: return Old::ReadyToCook;
+    case New::LowAppetite:
+    case New::WantLight: return Old::Neutral;
+    default: return Old::NotSelected;
+    }
+}
 
 struct FoodArt {
     int sprite;
@@ -271,6 +287,8 @@ HomeWidget::HomeWidget(RewardSystem* rewards, QWidget* parent)
         moodLayout->addWidget(button);
         connect(button, &QPushButton::clicked, this, [this, choice] {
             m_moodHint->hide();
+            if (!isSignalConnected(QMetaMethod::fromSignal(&HomeWidget::moodSelectedV1)))
+                emit moodSelected(legacyMood(choice.mood));
             emit moodSelectedV1(choice.mood);
         });
     }
@@ -290,8 +308,11 @@ HomeWidget::HomeWidget(RewardSystem* rewards, QWidget* parent)
             m_moodHint->show();
             return;
         }
-        emit moodRecommendationRequestedV1(
-            static_cast<Shixu::Contracts::V1::Mood>(selected));
+        const auto mood = static_cast<Shixu::Contracts::V1::Mood>(selected);
+        if (!isSignalConnected(QMetaMethod::fromSignal(
+                &HomeWidget::moodRecommendationRequestedV1)))
+            emit moodRecommendationRequested(legacyMood(mood));
+        emit moodRecommendationRequestedV1(mood);
     });
 
     QVBoxLayout* inventoryLayout;
