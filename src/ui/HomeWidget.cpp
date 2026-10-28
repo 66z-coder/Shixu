@@ -251,16 +251,18 @@ HomeWidget::HomeWidget(RewardSystem* rewards, QWidget* parent)
 
     m_moodButtons = new QButtonGroup(this);
     m_moodButtons->setExclusive(true);
-    const struct { Shixu::RecommendationEngine::Mood mood; const char* label; int minutes; } moods[] = {
-        {Shixu::RecommendationEngine::Mood::ReadyToCook, "有心情做饭", 60},
-        {Shixu::RecommendationEngine::Mood::Neutral, "状态一般", 30},
-        {Shixu::RecommendationEngine::Mood::Tired, "疲惫、想省事", 15},
+    using V1Mood = Shixu::Contracts::V1::Mood;
+    const struct { V1Mood mood; const char* label; int minutes; } moods[] = {
+        {V1Mood::Tired, "很累", 30},
+        {V1Mood::WantGoodFood, "想吃点好的", 45},
+        {V1Mood::LowAppetite, "没胃口", 30},
+        {V1Mood::WantLight, "想清爽一点", 40},
+        {V1Mood::TreatMyself, "想犒劳自己", 75},
     };
     for (const auto& choice : moods) {
         auto* button = new QPushButton(
-            QStringLiteral("%1　·　最多 %2 分钟")
-                .arg(QString::fromUtf8(choice.label))
-                .arg(choice.minutes), side);
+            QStringLiteral("%1　·　默认 %2 分钟")
+                .arg(QString::fromUtf8(choice.label)).arg(choice.minutes), side);
         button->setObjectName(QStringLiteral("homeMoodChoice"));
         button->setCheckable(true);
         button->setCursor(Qt::PointingHandCursor);
@@ -269,7 +271,7 @@ HomeWidget::HomeWidget(RewardSystem* rewards, QWidget* parent)
         moodLayout->addWidget(button);
         connect(button, &QPushButton::clicked, this, [this, choice] {
             m_moodHint->hide();
-            emit moodSelected(choice.mood);
+            emit moodSelectedV1(choice.mood);
         });
     }
 
@@ -288,8 +290,8 @@ HomeWidget::HomeWidget(RewardSystem* rewards, QWidget* parent)
             m_moodHint->show();
             return;
         }
-        emit moodRecommendationRequested(
-            static_cast<Shixu::RecommendationEngine::Mood>(selected));
+        emit moodRecommendationRequestedV1(
+            static_cast<Shixu::Contracts::V1::Mood>(selected));
     });
 
     QVBoxLayout* inventoryLayout;
@@ -389,10 +391,13 @@ HomeWidget::HomeWidget(RewardSystem* rewards, QWidget* parent)
 
 void HomeWidget::selectMood(Shixu::RecommendationEngine::Mood mood)
 {
-    if (QPushButton* button = qobject_cast<QPushButton*>(
-            m_moodButtons->button(static_cast<int>(mood)))) {
-        button->setChecked(true);
-        m_moodHint->hide();
+    using Old = Shixu::RecommendationEngine::Mood;
+    using New = Shixu::Contracts::V1::Mood;
+    switch (mood) {
+    case Old::ReadyToCook: selectMoodV1(New::WantGoodFood); break;
+    case Old::Neutral: selectMoodV1(New::LowAppetite); break;
+    case Old::Tired: selectMoodV1(New::Tired); break;
+    default: break;
     }
 }
 void HomeWidget::paintEvent(QPaintEvent* event)
@@ -467,4 +472,12 @@ void HomeWidget::refresh()
     m_checkInStatus->setText(m_rewards->hasCheckedIn(QDate::currentDate())
         ? QStringLiteral("今天已打卡 · 连续 %1 天 · %2 积分").arg(m_rewards->currentStreak()).arg(m_rewards->points())
         : QStringLiteral("今天还没有打卡 · 当前 %1 积分").arg(m_rewards->points()));
+}
+
+void HomeWidget::selectMoodV1(Shixu::Contracts::V1::Mood mood)
+{
+    if (auto* button = qobject_cast<QPushButton*>(m_moodButtons->button(static_cast<int>(mood)))) {
+        button->setChecked(true);
+        m_moodHint->hide();
+    }
 }

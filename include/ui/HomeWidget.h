@@ -6,6 +6,7 @@
 #include <QWidget>
 
 #include "recommendation/RecommendationEngine.h"
+#include "contracts/CoreContracts.h"
 
 class QButtonGroup;
 class QLabel;
@@ -30,6 +31,7 @@ public:
     explicit HomeWidget(RewardSystem* rewards, QWidget* parent = nullptr);
     void setInventory(const QList<HomeFoodItem>& foods);
     void selectMood(Shixu::RecommendationEngine::Mood mood);
+    void selectMoodV1(Shixu::Contracts::V1::Mood mood);
 
 signals:
     void foodEntryRequested();
@@ -38,6 +40,8 @@ signals:
     void checkInRequested();
     void moodRecommendationRequested(Shixu::RecommendationEngine::Mood mood);
     void moodSelected(Shixu::RecommendationEngine::Mood mood);
+    void moodSelectedV1(Shixu::Contracts::V1::Mood mood);
+    void moodRecommendationRequestedV1(Shixu::Contracts::V1::Mood mood);
 
 private:
     void refresh();

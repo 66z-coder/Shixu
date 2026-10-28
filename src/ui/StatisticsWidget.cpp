@@ -51,6 +51,7 @@ StatisticsWidget::StatisticsWidget(RewardSystem* rewards, QWidget* parent)
     auto* summary = new QGridLayout;
     summary->setSpacing(12);
     m_total = addMetric(summary, 0, 0, QStringLiteral("累计打卡"), body);
+    m_cooking = addMetric(summary, 2, 0, QStringLiteral("累计做饭"), body);
     m_streak = addMetric(summary, 0, 1, QStringLiteral("当前连续打卡"), body);
     m_points = addMetric(summary, 1, 0, QStringLiteral("当前积分"), body);
     m_achievements = addMetric(summary, 1, 1, QStringLiteral("已获得成就"), body);
@@ -75,16 +76,6 @@ StatisticsWidget::StatisticsWidget(RewardSystem* rewards, QWidget* parent)
     recentLayout->addLayout(days);
     layout->addWidget(recentCard);
 
-    auto* cookingCard = new QFrame(body);
-    cookingCard->setObjectName(QStringLiteral("statCard"));
-    auto* cookingLayout = new QVBoxLayout(cookingCard);
-    cookingLayout->setContentsMargins(20, 18, 20, 18);
-    auto* cookingTitle = new QLabel(QStringLiteral("做饭次数"), cookingCard);
-    cookingTitle->setObjectName(QStringLiteral("statSectionTitle"));
-    auto* cookingNote = new QLabel(QStringLiteral("接入菜谱模块后显示做饭记录"), cookingCard);
-    cookingLayout->addWidget(cookingTitle);
-    cookingLayout->addWidget(cookingNote);
-    layout->addWidget(cookingCard);
     layout->addStretch();
 
     setStyleSheet(QStringLiteral(R"(
@@ -105,10 +96,13 @@ StatisticsWidget::StatisticsWidget(RewardSystem* rewards, QWidget* parent)
 
 void StatisticsWidget::refresh()
 {
-    m_total->setText(QStringLiteral("%1 天").arg(m_rewards->totalCheckIns()));
-    m_streak->setText(QStringLiteral("%1 天").arg(m_rewards->currentStreak()));
-    m_points->setText(QString::number(m_rewards->points()));
-    m_achievements->setText(QString::number(m_rewards->unlockedAchievementCount()));
+    const auto growth = m_rewards->getGrowthSnapshot(QDate::currentDate().toString(Qt::ISODate).toStdString());
+    if (growth.outcome.status != Shixu::Contracts::V1::OperationStatus::Succeeded) return;
+    m_total->setText(QStringLiteral("%1 天").arg(growth.value.totalCheckIns));
+    m_cooking->setText(QStringLiteral("%1 次").arg(growth.value.totalCookingCount));
+    m_streak->setText(QStringLiteral("%1 天").arg(growth.value.currentStreak));
+    m_points->setText(QString::number(growth.value.totalPoints));
+    m_achievements->setText(QString::number(growth.value.unlockedAchievements.size()));
 
     const QDate today = QDate::currentDate();
     for (int i = 0; i < 7; ++i) {
