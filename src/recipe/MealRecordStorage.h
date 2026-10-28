@@ -4,54 +4,91 @@
 #include <vector>
 
 #include "model/MealRecord.h"
+#include "contracts/CoreContracts.h"  // OperationResult / ErrorCode
 
 // ============================================================================
 // C 模块内部：用餐记录的本地文件存储管理。
 //
-// 不是团队《公共接口文档 V2.0》冻结的接口，供 C 模块自身使用，
-// 并供后续 E 模块的统计功能读取（E 通过 C 模块调用此查询能力）。
+// 文件格式（版本化，一行一记录，UTF-8）：
+//   首行固定头：V2
+//   V2 记录行：10 字段，\x1F（Unit Separator）分隔，顺序：
+//     eventId, recipeId, recipeName, servings, time, date,
+//     calories, protein, carbohydrates, fat
+//   字段转义规则（确保任何字符串均可往返写入，含管道符、反斜杠、换行、CR）：
+//     \ → \\    | → \|    \n → \n    \r → \r
+//     解码器用 splitEscaped 跳过分隔符前的转义序列，不会误切字段。
+//   date 是独立持久化字段，不从 time 截取（契约要求完整冻结快照）。
+//   营养值用 std::setprecision(max_digits10) 序列化。
 //
-// 文件格式（管道分隔，一行一记录，追加写入，易读易解析，无第三方依赖）：
-//   recipeId|recipeName|servings|time|calories|protein|carbohydrates|fat
-// 示例：
-//   1|番茄炒蛋|2|2026-10-20 19:30:00|781.70|43.50|24.40|57.17
+// 旧 recordMeal() 继续通过本命名空间写入，但 eventId 留空串，
+// 不触发幂等去重（与 recordMealOnce 的 eventId 非空严格区分）。
 //
-// 错误处理：recordMeal 返回 void，因此存储层将错误诊断存于内部 lastError，
-// 调用方可通过 getLastError() 查询。文件路径可通过 setFilePath 覆盖，
-// 测试时指向临时目录即可隔离。
+// 写入路径：
+//   append（旧自由函数用）：文件不存在/空 → 先写 V2 头 + 空 eventId 记录；
+//   已存在 V2 文件 → 直接追加空 eventId 记录。不做全量读写。
+//   recordMealOnce（新接口）：先严格读全量校验版本与旧内容，
+//   幂等判断后将完整内容写入临时文件，再原子替换。
+//
+// 可靠替换：写同目录 .tmp → flush + close → std::filesystem::rename。
+//   Windows 下 rename 若目标已存在会失败，改用 MoveFileEx
+//   (MOVEFILE_REPLACE_EXISTING)。替换失败时原文件完好返回 StorageFailure。
 // ============================================================================
 
 namespace MealRecordStorage {
 
 // 设置用餐记录文件的绝对路径（或工作目录相对路径）。
-// 默认路径为 "meal_records.txt"（工作目录下），适合命令行测试与原型。
-// Qt 桌面应用集成时，建议 E 模块在程序启动时通过此函数设置到绝对路径
-// （例如 QStandardPaths::writableLocation 所返回的应用数据目录），
-// 避免因从不同工作目录启动而产生多份记录文件。
-// 本存储层不直接依赖 Qt，保持可独立测试。
+// 默认路径为 "meal_records.txt"。
+// Windows 下 UTF-8 路径通过 std::filesystem::u8path 转换。
 void setFilePath(const std::string& path);
 
-// 获取当前使用的文件路径（主要用于日志和调试）。
+// 获取当前使用的文件路径。
 std::string filePath();
 
-// 将一条用餐记录追加写入文件。
-// 写入失败（例如无法打开）时函数返回 false，详细信息存入 lastError。
+// 将一条用餐记录追加写入文件（旧 recordMeal() 调用）。
+// 调用方传入的 record.eventId 必须为空（本函数不做事件去重）。
+// 文件不存在/空 → 先写 V2 头，再追加空 eventId 记录。
+// 写入失败时返回 false，错误信息存入 lastError。
 bool append(const MealRecord& record);
 
-// 从文件完整读取全部用餐记录。读取失败时返回空向量，
-// 详细错误存入 lastError。文件不存在时返回空（视为合法空库）。
+// ---------------------------------------------------------------------------
+// 严格读取：区分三种情况
+//   正常：返回所有记录（V1 无 eventId 列的遗留记录也会读入，eventId 字段为空串）。
+//   空文件 / 不存在：返回空向量，lastError 清空（合法空库，非错误）。
+//   损坏/版本未知/字段错：lastError 设为 "InvalidData: ..." 前缀，
+//     返回空向量，禁止静默跳行。
+// ---------------------------------------------------------------------------
 std::vector<MealRecord> loadAll();
 
-// 按日期查询，date 格式 YYYY-MM-DD（匹配 record.date 前 10 字符）。
+// 按日期查询（date 格式 YYYY-MM-DD）。
 std::vector<MealRecord> loadByDate(const std::string& date);
 
-// 按日期汇总总营养（返回 0.0 的日期说明当天没记录）。
+// 按日期汇总总营养。
 NutritionInfo summarizeByDate(const std::string& date);
 
+// ---------------------------------------------------------------------------
+// 幂等写入 —— 新接口调用。
+//
+// 空 eventId → 返回 Failed + InvalidArgument，不写入任何记录。
+// 同 eventId 同内容 → AlreadyApplied，savedRecord 为此前保存的记录快照。
+// 同 eventId 不同内容 → Failed + EventConflict。
+// 无匹配 → 完整内容写入临时文件 + 原子替换，成功返回 Succeeded。
+//
+// 失败时原文件必须完好（临时文件不会覆盖目标）。
+// OperationResult.errorCode 使用 CoreContracts.h 中 ErrorCode 枚举。
+// savedRecord 指向写入前加载/构造的记录快照，而非内存引用。
+// ---------------------------------------------------------------------------
+struct IdempotentResult {
+    Shixu::Contracts::V1::OperationResult outcome;
+    std::optional<MealRecord> savedRecord;
+};
+IdempotentResult recordMealOnce(const std::string& eventId, const MealRecord& record);
+
 // 最近一次文件操作的错误描述；无错误时为空串。
+// "InvalidData:" 前缀表示损坏/格式错误；
+// 其他前缀（如 "StorageFailure:"、"InvalidArgument:"）由调用方读取。
 std::string getLastError();
 
-// 清空错误状态（便于调用方重置后再次尝试）。
+// 清空错误状态。
 void clearLastError();
 
 } // namespace MealRecordStorage

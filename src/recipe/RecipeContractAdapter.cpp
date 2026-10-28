@@ -50,6 +50,10 @@ OperationResult RecipeContractAdapter::notFound(const std::string& what)
 OperationResult RecipeContractAdapter::storageFailure(const std::string& action)
 {
     const std::string detail = MealRecordStorage::getLastError();
+    // 区分损坏 vs 权限/IO 失败
+    if (detail.rfind("InvalidData:", 0) == 0) {
+        return fail(ErrorCode::InvalidData, detail);
+    }
     return fail(ErrorCode::StorageFailure,
                 "Failed to " + action + (detail.empty() ? "" : ": " + detail));
 }
@@ -121,28 +125,27 @@ QueryResult<NutritionInfo> RecipeContractAdapter::getNutritionByDate(
 }
 
 // ---------------------------------------------------------------------------
-// recordMealOnce — 阶段二显式过渡状态
+// recordMealOnce — 阶段三：可靠幂等存储
 //
-// 幂等存储（eventId 去重、版本化格式、原子替换、重启后生效）是阶段三补齐。
-// 在阶段二尚未具备这些能力时，本函数诚实返回 InvalidState，
-// 不调用旧 MealRecordStorage::append 写入任何记录，避免制造伪成功和重复写入。
-//
-// 阶段三完成后，本函数将改为：
-//   1) 读全量查同 eventId；同内容 → AlreadyApplied + savedRecord；
-//      不同内容 → EventConflict；
-//   2) 无冲突 → 版本化格式 + eventId 列写入，临时文件 + 原子替换。
+// 调用 MealRecordStorage::recordMealOnce 完成：
+//   • eventId 空 → StorageFailure(InvalidArgument)
+//   • 同 eventId + 同内容 → AlreadyApplied + savedRecord
+//   • 同 eventId + 不同内容 → Failed + EventConflict
+//   • 无冲突 → Succeeded + savedRecord（原子替换写入）
+//   • 存储损坏 → Failed + InvalidData；写入失败 → Failed + StorageFailure
 // ---------------------------------------------------------------------------
 
 MealWriteResult RecipeContractAdapter::recordMealOnce(
     const MealWriteRequest& request)
 {
-    // 阶段二过渡：幂等存储尚未就绪，诚实返回 InvalidState，
-    // 不调用旧 append 制造伪成功和重复记录。
     MealWriteResult result;
-    result.outcome = fail(ErrorCode::InvalidState,
-        "recordMealOnce 幂等存储尚未实现（阶段三补齐 eventId 持久化、版本化格式与原子替换）。"
-        "当前调用会被拒绝，请改用旧 recordMeal 或等待阶段三。");
     result.eventId = request.eventId;
+
+    MealRecordStorage::clearLastError();
+    const auto storageResult = MealRecordStorage::recordMealOnce(
+        request.eventId, request.record);
+    result.outcome = storageResult.outcome;
+    result.savedRecord = storageResult.savedRecord;
     return result;
 }
 
