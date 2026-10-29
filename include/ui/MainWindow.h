@@ -2,6 +2,7 @@
 
 #include <QMainWindow>
 #include <QVector>
+#include <memory>
 
 class QLabel;
 class QPushButton;
@@ -28,7 +29,7 @@ public:
         Count
     };
 
-    explicit MainWindow(QWidget* parent = nullptr);
+    explicit MainWindow(QWidget* parent = nullptr, const QString& rewardFile = {});
     ~MainWindow() override;
 
     // Replaces a placeholder when a feature widget is ready. The window owns widget.
@@ -37,6 +38,12 @@ public:
     void addFood(const FoodCandidate& candidate);
 
 private:
+    struct Services;
+    std::unique_ptr<Services> m_services;
+    void initializeV1(class RewardSystem* rewards, class RecommendationWidget* recommendations);
+    void openRecipe(int recipeId);
+    void openCooking(int recipeId, const QString& eventId = {});
+    void refreshPending();
     QStackedWidget* m_pages = nullptr;
     QLabel* m_pageTitle = nullptr;
     QFrame* m_content = nullptr;

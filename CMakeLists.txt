@@ -98,13 +98,22 @@ if(QT_FOUND)
     target_include_directories(ShixuRecommendation PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(ShixuRecommendation PUBLIC ShixuRecipe Qt${QT_VERSION_MAJOR}::Core)
 
+    add_library(ShixuRecommendationV1 STATIC src/recommendation/RecommendationContractAdapter.cpp)
+    target_link_libraries(ShixuRecommendationV1 PUBLIC ShixuRecommendation)
+    add_library(ShixuReward STATIC include/reward/RewardSystem.h src/reward/RewardSystem.cpp src/reward/RewardContractAdapter.cpp)
+    target_include_directories(ShixuReward PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(ShixuReward PUBLIC Qt${QT_VERSION_MAJOR}::Core)
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Sql)
+    add_library(ShixuCooking STATIC src/integration/CookingCompletionService.cpp)
+    target_link_libraries(ShixuCooking PUBLIC ShixuRecipe ShixuRecognition Qt${QT_VERSION_MAJOR}::Sql)
+
     # Retain E's application pages, reward system and resources.
     add_executable(Shixu
         src/main.cpp
         include/ui/MainWindow.h
         src/ui/MainWindow.cpp
-        include/reward/RewardSystem.h
-        src/reward/RewardSystem.cpp
+        include/ui/RecipeDetailsWidget.h src/ui/RecipeDetailsWidget.cpp
+        include/ui/CookingConfirmationWidget.h src/ui/CookingConfirmationWidget.cpp
         include/ui/CheckInWidget.h
         src/ui/CheckInWidget.cpp
         include/ui/StatisticsWidget.h
@@ -119,7 +128,7 @@ if(QT_FOUND)
         src/ui/InventoryWidget.cpp
     )
     target_include_directories(Shixu PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(Shixu PRIVATE ShixuRecommendation ShixuRecognition Qt${QT_VERSION_MAJOR}::Widgets)
+    target_link_libraries(Shixu PRIVATE ShixuCooking ShixuReward ShixuRecommendationV1 ShixuRecommendation ShixuRecognition Qt${QT_VERSION_MAJOR}::Widgets)
 
     add_executable(RecommendationDemo src/recommendation/demo_main.cpp)
     target_link_libraries(RecommendationDemo PRIVATE ShixuRecommendation Qt${QT_VERSION_MAJOR}::Widgets)
@@ -245,7 +254,7 @@ if(QT_FOUND)
             list(REMOVE_ITEM SHIXU_APP_SOURCES src/main.cpp)
             add_executable(PackagingIntegrationTest tests/ui/PackagingIntegrationTest.cpp ${SHIXU_APP_SOURCES})
             target_include_directories(PackagingIntegrationTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-            target_link_libraries(PackagingIntegrationTest PRIVATE ShixuRecognition ShixuRecommendationInventory Qt${QT_VERSION_MAJOR}::Widgets)
+            target_link_libraries(PackagingIntegrationTest PRIVATE ShixuCooking ShixuReward ShixuRecommendationV1 ShixuRecognition ShixuRecommendationInventory Qt${QT_VERSION_MAJOR}::Widgets)
             add_test(NAME PackagingIntegrationTest COMMAND PackagingIntegrationTest)
             set_tests_properties(PackagingIntegrationTest PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
         endif()
@@ -264,4 +273,42 @@ if(QT_FOUND)
     endif()
 else()
     message(STATUS "Qt Widgets unavailable: only the C recipe library and tests are enabled.")
+endif()
+
+if(QT_FOUND AND BUILD_TESTING)
+    add_executable(RecommendationV1Tests tests/recommend/v1/test_recommendation_v1.cpp)
+    target_link_libraries(RecommendationV1Tests PRIVATE ShixuRecommendationV1)
+    add_test(NAME RecommendationV1Tests COMMAND RecommendationV1Tests)
+    add_executable(RewardSystemV1Test tests/reward/RewardContractTest.cpp)
+    target_link_libraries(RewardSystemV1Test PRIVATE ShixuReward)
+    add_test(NAME RewardSystemV1Test COMMAND RewardSystemV1Test)
+    add_executable(UiContractTest tests/ui/UiContractTest.cpp
+        include/ui/RecommendationWidget.h src/ui/RecommendationWidget.cpp
+        include/ui/RecipeDetailsWidget.h src/ui/RecipeDetailsWidget.cpp
+        include/ui/CookingConfirmationWidget.h src/ui/CookingConfirmationWidget.cpp)
+    target_include_directories(UiContractTest PRIVATE include)
+    target_link_libraries(UiContractTest PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
+    add_test(NAME UiContractTest COMMAND UiContractTest)
+    set_tests_properties(UiContractTest PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+if(QT_FOUND AND BUILD_TESTING AND TARGET ShixuInventory)
+    add_executable(CookingCompletionTest tests/integration/CookingCompletionTest.cpp resources/recognition.qrc)
+    target_include_directories(CookingCompletionTest PRIVATE src)
+    target_link_libraries(CookingCompletionTest PRIVATE ShixuCooking ShixuInventory ShixuReward ShixuRecommendationV1)
+    add_test(NAME CookingCompletionTest COMMAND CookingCompletionTest)
+endif()
+if(QT_FOUND AND BUILD_TESTING AND TARGET ShixuInventory)
+    add_executable(MainWindowFlowTest tests/integration/MainWindowFlowTest.cpp ${SHIXU_APP_SOURCES})
+    target_include_directories(MainWindowFlowTest PRIVATE src)
+    target_link_libraries(MainWindowFlowTest PRIVATE ShixuCooking ShixuReward ShixuRecommendationV1 ShixuRecognition ShixuRecommendationInventory Qt${QT_VERSION_MAJOR}::Widgets)
+    add_test(NAME MainWindowFlowTest COMMAND MainWindowFlowTest)
+    set_tests_properties(MainWindowFlowTest PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+endif()
+if(QT_FOUND AND BUILD_TESTING)
+    add_executable(LegacyRoutingTest tests/ui/LegacyRoutingTest.cpp
+        include/ui/HomeWidget.h src/ui/HomeWidget.cpp
+        include/ui/RecommendationWidget.h src/ui/RecommendationWidget.cpp)
+    target_link_libraries(LegacyRoutingTest PRIVATE ShixuReward Qt${QT_VERSION_MAJOR}::Widgets)
+    add_test(NAME LegacyRoutingTest COMMAND LegacyRoutingTest)
+    set_tests_properties(LegacyRoutingTest PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
