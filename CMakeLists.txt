@@ -142,7 +142,15 @@ if(QT_FOUND)
        AND EXISTS "${SHIXU_INVENTORY_ROOT}/src/inventory/inventory.h"
        AND EXISTS "${SHIXU_INVENTORY_ROOT}/include/model/FoodCandidate.h")
         message(STATUS "B inventory source: ${SHIXU_INVENTORY_ROOT}")
-        add_library(ShixuInventory STATIC "${SHIXU_INVENTORY_ROOT}/src/inventory/inventory.cpp")
+        add_library(ShixuInventory STATIC
+            "${SHIXU_INVENTORY_ROOT}/src/inventory/inventory.cpp"
+            "${SHIXU_INVENTORY_ROOT}/src/inventory/InventoryContractAdapter.cpp"
+
+
+
+
+
+)
         target_include_directories(ShixuInventory PUBLIC
             "${SHIXU_INVENTORY_ROOT}/include" "${SHIXU_INVENTORY_ROOT}/src/inventory")
         target_link_libraries(ShixuInventory PUBLIC Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Sql)
@@ -192,6 +200,29 @@ if(QT_FOUND)
                 Qt${QT_VERSION_MAJOR}::Sql
             )
             add_test(NAME InventoryIntegrationTest COMMAND InventoryIntegrationTest)
+
+
+            # B 模块：V1 合同接口功能测试
+            add_executable(InventoryContractTest
+                tests/inventory/InventoryContractTest.cpp
+            )
+
+            target_link_libraries(InventoryContractTest PRIVATE
+                ShixuInventory
+            )
+
+            target_include_directories(InventoryContractTest PRIVATE
+                "${SHIXU_INVENTORY_ROOT}/include"
+                "${SHIXU_INVENTORY_ROOT}/src"
+            )
+
+            add_test(
+                NAME InventoryContractTest
+                COMMAND InventoryContractTest
+            )
+
+
+
         endif()
 
         add_library(ShixuRecommendationInventory STATIC src/recommendation/RecommendationContextBuilder.cpp)
