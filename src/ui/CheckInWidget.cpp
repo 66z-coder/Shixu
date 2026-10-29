@@ -1,3 +1,4 @@
+#include "core/AppClock.h"
 #include "ui/CheckInWidget.h"
 
 #include "reward/RewardSystem.h"
@@ -156,7 +157,7 @@ CheckInWidget::CheckInWidget(RewardSystem* rewards, QWidget* parent)
 
 void CheckInWidget::refresh()
 {
-    const QDate today = QDate::currentDate();
+    const QDate today = Shixu::appNow().date();
     const bool checkedIn = m_rewards->hasCheckedIn(today);
     m_status->setText(checkedIn ? QStringLiteral("今天已完成打卡，明天继续保持！")
                                 : QStringLiteral("记录今天的饮食生活，从一次打卡开始。"));

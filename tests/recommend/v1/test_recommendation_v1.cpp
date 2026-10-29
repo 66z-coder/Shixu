@@ -15,6 +15,7 @@ V::OperationResult ok() { return {V::OperationStatus::Succeeded, V::ErrorCode::N
 template<class T> V::QueryResult<T> unused()
 { throw std::runtime_error("Unexpected unrelated service call"); }
 struct Recipes final : V::IRecipeService {
+    V::QueryResult<std::vector<MealRecord>> getAllMeals() const override { return unused<std::vector<MealRecord>>(); }
     std::vector<Recipe> data;
     bool fail = false;
     V::QueryResult<std::vector<Recipe>> getAllRecipes() const override

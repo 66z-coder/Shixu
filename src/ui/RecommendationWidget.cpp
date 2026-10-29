@@ -1,3 +1,4 @@
+#include "core/AppClock.h"
 #include "ui/RecommendationWidget.h"
 
 #include <QButtonGroup>
@@ -489,7 +490,7 @@ void RecommendationWidget::sendV1Request()
     preferences.refinement = m_refinement;
     preferences.excludedRecipeIds = m_excludedIds;
     preferences.servings = 1;
-    preferences.referenceDate = QDate::currentDate().toString(Qt::ISODate).toStdString();
+    preferences.referenceDate = Shixu::appNow().date().toString(Qt::ISODate).toStdString();
     if (!isSignalConnected(QMetaMethod::fromSignal(
             &RecommendationWidget::recommendationRequestedV1)))
         emit recommendationRequested(legacyMood(m_moodV1), preferences.maxPreparationMinutes);

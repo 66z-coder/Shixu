@@ -20,6 +20,7 @@ bool ok(const V::OperationResult &r) {
     return r.status == V::OperationStatus::Succeeded || r.status == V::OperationStatus::AlreadyApplied;
 }
 struct RecipeFault : V::IRecipeService {
+    V::QueryResult<std::vector<MealRecord>> getAllMeals() const override { return real.getAllMeals(); }
     V::IRecipeService &real;
     bool fail = false;
     explicit RecipeFault(V::IRecipeService &r) : real(r) {}

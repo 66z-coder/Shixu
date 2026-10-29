@@ -120,6 +120,7 @@ public:
     virtual ~IRecipeService() = default;
     virtual QueryResult<std::vector<Recipe>> getAllRecipes() const = 0;
     virtual QueryResult<Recipe> findRecipeById(RecipeId) const = 0;
+    virtual QueryResult<std::vector<MealRecord>> getAllMeals() const = 0;
     virtual QueryResult<std::vector<MealRecord>> getMealsByDate(const LocalDate&) const = 0;
     virtual QueryResult<NutritionInfo> getNutritionByDate(const LocalDate&) const = 0;
     virtual MealWriteResult recordMealOnce(const MealWriteRequest&) = 0;
@@ -227,5 +228,6 @@ public:
     // Only before B committed; retain cancellation tombstone, never undo a consumed event.
     virtual CookingCompletionResult cancelPreparedCompletion(const EventId&) = 0;
     virtual QueryResult<std::vector<CookingCompletionResult>> getPendingCompletions() const = 0;
+    virtual QueryResult<std::vector<CookingCompletionDetails>> getCompletedCompletions() const = 0;
 };
 } // namespace Shixu::Contracts::V1

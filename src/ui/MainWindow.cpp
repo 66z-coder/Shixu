@@ -1,3 +1,6 @@
+#include "core/AppClock.h"
+#include "contracts/ActivityContracts.h"
+#include <QFileInfo>
 #include "ui/MainWindow.h"
 #include "recognition/PackagingEntryWidget.h"
 
@@ -43,7 +46,7 @@ bool succeeded(const V::OperationResult &r) {
     return r.status == V::OperationStatus::Succeeded || r.status == V::OperationStatus::AlreadyApplied;
 }
 QString text(const std::string &s) { return QString::fromUtf8(s.c_str()); }
-QDateTime appNow() { return QDateTime::currentDateTimeUtc().toTimeZone(QTimeZone("Asia/Shanghai")); }
+QDateTime appNow() { return Shixu::appNow(); }
 } // namespace
 struct MainWindow::Services {
     std::unique_ptr<V::IInventoryService> inventory;
@@ -51,6 +54,8 @@ struct MainWindow::Services {
     std::unique_ptr<V::IRewardService> rewards;
     std::unique_ptr<V::IRecommendationService> recommendation;
     std::unique_ptr<V::ICookingCompletionService> cooking;
+    std::unique_ptr<V::ICookingActivityService> activity;
+    StatisticsWidget* statistics = nullptr;
     RecommendationWidget *recommendations = nullptr;
     QListWidget *pending = nullptr;
     QLabel *status = nullptr;
@@ -219,7 +224,8 @@ MainWindow::MainWindow(QWidget *parent, const QString &rewardFile) : QMainWindow
     setPage(Page::Recommendations, recommendations);
     initializeV1(rewards, recommendations);
     setPage(Page::CheckIn, new CheckInWidget(rewards, m_pages));
-    setPage(Page::Statistics, new StatisticsWidget(rewards, m_pages));
+    m_services->statistics = new StatisticsWidget(rewards, m_pages, m_services->activity.get());
+    setPage(Page::Statistics, m_services->statistics);
     showPage(Page::Home);
     refreshPending();
 }
@@ -243,6 +249,8 @@ void MainWindow::initializeV1(RewardSystem *rewards, RecommendationWidget *recom
     s.cooking = V::createCookingCompletionService(
         *s.inventory, *s.recipes, *s.rewards,
         QDir::current().absoluteFilePath("cooking_events.sqlite").toUtf8().toStdString());
+    s.activity = V::createCookingActivityService(*s.recipes, *s.inventory, *s.cooking,
+        QFileInfo(rewards->storageFilePath()).dir().filePath("cooking_achievements.json").toUtf8().toStdString());
     s.recommendations = recommendations;
     s.date = appNow().date().toString(Qt::ISODate);
     connect(m_home, &HomeWidget::moodSelectedV1, this, [recommendations](V::Mood mood) {
@@ -339,6 +347,7 @@ void MainWindow::initializeV1(RewardSystem *rewards, RecommendationWidget *recom
 }
 
 void MainWindow::refreshPending() {
+    if (m_services && m_services->statistics) m_services->statistics->refresh();
     if (!m_services)
         return;
     auto pending = m_services->cooking->getPendingCompletions();
@@ -517,6 +526,7 @@ void MainWindow::setPage(Page page, QWidget *widget) {
 }
 
 void MainWindow::showPage(Page page) {
+    if (page == Page::Statistics && m_services && m_services->statistics) m_services->statistics->refresh();
     const int index = static_cast<int>(page);
     if (index < 0 || index >= m_pages->count()) {
         return;

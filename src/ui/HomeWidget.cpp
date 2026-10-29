@@ -1,3 +1,4 @@
+#include "core/AppClock.h"
 #include "ui/HomeWidget.h"
 
 #include "reward/RewardSystem.h"
@@ -475,7 +476,7 @@ void HomeWidget::refresh()
             m_foodGrid->addWidget(tile, i / 4, i % 4);
         }
 
-        const QDate today = QDate::currentDate();
+        const QDate today = Shixu::appNow().date();
         QStringList expiring;
         for (const HomeFoodItem& food : m_foods) {
             if (food.expiryDate.isValid() && today.daysTo(food.expiryDate) <= 3) {
@@ -490,7 +491,7 @@ void HomeWidget::refresh()
                                                      : expiring.mid(0, 2).join(QLatin1Char('\n')));
     }
 
-    m_checkInStatus->setText(m_rewards->hasCheckedIn(QDate::currentDate())
+    m_checkInStatus->setText(m_rewards->hasCheckedIn(Shixu::appNow().date())
         ? QStringLiteral("今天已打卡 · 连续 %1 天 · %2 积分").arg(m_rewards->currentStreak()).arg(m_rewards->points())
         : QStringLiteral("今天还没有打卡 · 当前 %1 积分").arg(m_rewards->points()));
 }

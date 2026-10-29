@@ -25,6 +25,7 @@ public:
     // IRecipeService 五方法。
     QueryResult<std::vector<Recipe>> getAllRecipes() const override;
     QueryResult<Recipe> findRecipeById(RecipeId id) const override;
+    QueryResult<std::vector<MealRecord>> getAllMeals() const override;
     QueryResult<std::vector<MealRecord>> getMealsByDate(const LocalDate& date) const override;
     QueryResult<NutritionInfo> getNutritionByDate(const LocalDate& date) const override;
     MealWriteResult recordMealOnce(const MealWriteRequest& request) override;

@@ -104,6 +104,8 @@ int main(int argc, char **argv) {
             auto *reward = window.findChild<RewardSystem *>();
             if (!reward || reward->totalCookingCount() != 1)
                 outcome = 5;
+            if (window.findChild<QLabel *>("verifiedCookingCount")->text() != QStringLiteral("1 次"))
+                outcome = 7;
         }
     }
     // New window reads the same files without applying the completed event again.
@@ -112,6 +114,9 @@ int main(int argc, char **argv) {
         auto *reward = restored.findChild<RewardSystem *>();
         if (!reward || reward->totalCookingCount() != 1)
             outcome = 6;
+        if (restored.findChild<QLabel *>("verifiedCookingCount")->text() != QStringLiteral("1 次") ||
+            !restored.findChild<QLabel *>("cookingAchievements")->text().contains(QStringLiteral("已解锁")))
+            outcome = 8;
     }
     QDir::setCurrent(cwd);
     std::cout << "MainWindow empty-stock -> five-mood -> detail -> confirm -> restart: " << outcome << '\n';

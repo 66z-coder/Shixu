@@ -18,6 +18,12 @@
 #include <QListWidget>
 #include <QScrollArea>
 #include <QPainter>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
+#include <QMimeData>
+#include <QFileInfo>
+#include <QUrl>
 
 namespace {
 // Paint the original image into the current preview area without imposing its width.
@@ -156,6 +162,7 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
         return label;
     };
     auto* recognitionCard = makeCard(editor);
+    recognitionCard->setObjectName("packageDropArea");
     auto* layout = new QVBoxLayout(recognitionCard);
     layout->setContentsMargins(16, 16, 16, 16);
     layout->setSpacing(12);
@@ -182,12 +189,13 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     submit_ = new QPushButton("确认提交全部食材", this); submit_->setObjectName("submitCandidate");
     batch->addWidget(edit_); batch->addWidget(remove_); batch->addWidget(submit_);
     root->addWidget(batchCard, 2);
-    auto* intro = new QLabel("可直接手动录入，也可识别包装辅助填写日期。逐项添加到右侧列表后，一次提交。", this);
+    auto* intro = new QLabel("可导入或拖入一张本地包装图片，点击识别后核对日期；也可直接手动录入。", this);
     intro->setWordWrap(true);
     intro->setProperty("entryHint", true);
     layout->addWidget(intro);
     auto* buttons = new QHBoxLayout();
     choose_ = new QPushButton("导入包装图片", this);
+    choose_->setObjectName("choosePackageImage");
     recognize_ = new QPushButton("识别包装文字", this);
     cancel_ = new QPushButton("取消识别", this);
     recognize_->setEnabled(false);
@@ -261,6 +269,8 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     save_ = new QPushButton("添加食材到列表", this); save_->setObjectName("saveFood");
     reset_ = new QPushButton("清空表单 / 取消修改", this); reset_->setObjectName("resetForm");
     layout->addWidget(save_); layout->addWidget(reset_);
+    QList<QWidget*> dropTargets=recognitionCard->findChildren<QWidget*>();dropTargets.append(recognitionCard);
+    for(auto* target:dropTargets){target->setAcceptDrops(true);target->installEventFilter(this);}
     for (auto* button : findChildren<QPushButton*>()) {
         button->setMinimumHeight(36);
         button->setCursor(Qt::PointingHandCursor);
@@ -378,16 +388,49 @@ void PackagingEntryWidget::completeSubmission(bool success, const QString& messa
 
 void PackagingEntryWidget::chooseImage()
 {
-    const QString path = QFileDialog::getOpenFileName(this, "选择包装日期照片", imagePath_, "图片 (*.png *.jpg *.jpeg *.PNG *.JPG *.JPEG)");
+    const QString path = QFileDialog::getOpenFileName(this, "选择包装日期照片", imagePath_, "图片 (*.png *.jpg *.jpeg *.bmp *.webp *.PNG *.JPG *.JPEG)");
     if (path.isEmpty()) return;
+    loadImageFile(path);
+}
+
+bool PackagingEntryWidget::loadImageFile(const QString& path)
+{
+    if(submitting_||ocr_.isBusy()||!isEnabled()){status_->setText("正在识别或提交，请完成后再替换图片。");return false;}
+    if(!QFileInfo(path).isFile()){status_->setText("请导入一张本地图片文件，不能导入文件夹或链接。");return false;}
     QImageReader reader(path); reader.setAutoTransform(true);
     const auto image = reader.read();
-    if (image.isNull()) { status_->setText("图片无法读取，请重新选择"); return; }
+    if (image.isNull()) { status_->setText("图片无法读取，请重新选择；当前内容已保留。"); return false; }
     imagePath_ = path;
     static_cast<PackagingPreview*>(preview_)->showImage(image);
     raw_->clear(); production_->clear(); expiry_->clear(); period_->setValue(0); mode_->setCurrentIndex(0);
     confirmed_->setChecked(false); recognize_->setEnabled(true);
     status_->setText("图片已导入，请识别包装文字");
+    refresh();
+    return true;
+}
+
+bool PackagingEntryWidget::eventFilter(QObject* watched,QEvent* event)
+{
+    if(event->type()==QEvent::DragEnter||event->type()==QEvent::DragMove||event->type()==QEvent::Drop){
+        auto* drop=static_cast<QDropEvent*>(event);
+        const auto* mime=drop->mimeData();
+        if(!mime->hasUrls())return QWidget::eventFilter(watched,event);
+        if(submitting_||ocr_.isBusy()||!isEnabled()){
+            status_->setText("正在识别或提交，请完成后再替换图片。");drop->ignore();return true;
+        }
+        const auto urls=mime->urls();
+        if(urls.size()!=1||!urls.front().isLocalFile()||!QFileInfo(urls.front().toLocalFile()).isFile()){
+            status_->setText("请一次拖入一张本地图片；不支持多文件、目录或远程链接。");drop->ignore();return true;
+        }
+        QImageReader reader(urls.front().toLocalFile());
+        if(!reader.canRead()){
+            status_->setText("图片无法读取；当前内容已保留。");drop->ignore();return true;
+        }
+        if(event->type()!=QEvent::Drop||loadImageFile(urls.front().toLocalFile()))drop->acceptProposedAction();
+        else drop->ignore();
+        return true;
+    }
+    return QWidget::eventFilter(watched,event);
 }
 
 void PackagingEntryWidget::parseText()

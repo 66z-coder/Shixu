@@ -15,6 +15,7 @@ class RewardSystem : public QObject
 
 public:
     explicit RewardSystem(QObject* parent = nullptr, QString storageFile = {});
+    QString storageFilePath() const { return m_storageFile; }
 
     bool checkIn();
     bool hasCheckedIn(const QDate& date) const;

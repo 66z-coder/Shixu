@@ -11,6 +11,7 @@ struct InventoryAdapter final : IInventoryService {
     ConsumptionResult consumeForCooking(const ConsumptionRequest&, const std::string&) override { return {}; }
 };
 struct RecipeAdapter final : IRecipeService {
+    QueryResult<std::vector<MealRecord>> getAllMeals() const override { return {}; }
     QueryResult<std::vector<Recipe>> getAllRecipes() const override { return {}; }
     QueryResult<Recipe> findRecipeById(RecipeId) const override { return {}; }
     QueryResult<std::vector<MealRecord>> getMealsByDate(const LocalDate&) const override { return {}; }
@@ -22,6 +23,7 @@ struct RewardAdapter final : IRewardService {
     QueryResult<GrowthSnapshot> getGrowthSnapshot(const LocalDate&) const override { return {}; }
 };
 struct CompletionAdapter final : ICookingCompletionService {
+    QueryResult<std::vector<CookingCompletionDetails>> getCompletedCompletions() const override { return {}; }
     CookingCompletionPreview previewCompletion(const CookingCompletionRequest&) override { return {}; }
     CookingCompletionResult completeCooking(const CookingCompletionRequest&, const std::string&) override { return {}; }
     CookingCompletionResult retryCompletion(const EventId&) override { return {}; }
