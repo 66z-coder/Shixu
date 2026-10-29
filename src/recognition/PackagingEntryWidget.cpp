@@ -17,8 +17,38 @@
 #include <QPixmap>
 #include <QListWidget>
 #include <QScrollArea>
+#include <QPainter>
 
 namespace {
+// Paint the original image into the current preview area without imposing its width.
+class PackagingPreview final : public QLabel
+{
+public:
+    explicit PackagingPreview(QWidget* parent) : QLabel(parent) {
+        setAlignment(Qt::AlignCenter);
+        setMinimumWidth(0);
+        setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+        setFixedHeight(144);
+        setText("尚未导入包装图片");
+    }
+    void showImage(const QImage& image) {
+        original_ = QPixmap::fromImage(image);
+        setText(original_.isNull() ? QStringLiteral("尚未导入包装图片") : QString());
+        update();
+    }
+protected:
+    void paintEvent(QPaintEvent* event) override {
+        QLabel::paintEvent(event);
+        if (original_.isNull()) return;
+        const QRect area = contentsRect().adjusted(12, 12, -12, -12);
+        const auto scaled = original_.scaled(area.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        QPainter painter(this);
+        painter.drawPixmap(area.center() - QPoint(scaled.width()/2, scaled.height()/2), scaled);
+    }
+private:
+    QPixmap original_;
+};
+
 // Optional numeric fields keep zero as "unknown", but show a real placeholder.
 // Unlike specialValueText, the placeholder is not part of the editable number.
 template<class Base, class Number>
@@ -67,25 +97,94 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
 {
     setWindowTitle("食序 - 包装日期识别与食材录入");
     resize(1100, 800);
+    setObjectName("packagingEntry");
+    setAttribute(Qt::WA_StyledBackground, true);
+    setStyleSheet(QStringLiteral(R"(
+        QWidget#packagingEntry { background: #EDF7F9; color: #24465B; font-size: 14px; }
+        QWidget#entryEditor, QScrollArea#entryScroll { background: transparent; border: 0; }
+        QFrame[entryCard="true"] { background: #FFFFFF; border: 1px solid #E1EDF0; border-radius: 16px; }
+        QLabel { color: #38586C; background: transparent; border: 0; }
+        QLabel[entryHeading="true"] { color: #244E6A; font-size: 18px; font-weight: 600; }
+        QLabel[entryHint="true"] { color: #7893A0; font-size: 13px; }
+        QLabel#packagePreview { background: #EFF7FA; border: 1px dashed #C8DEE8; border-radius: 10px; color: #7893A0; }
+        QLabel#entryStatus, QLabel#entrySummary { background: #EFF7FA; border-radius: 8px; padding: 10px; }
+        QLineEdit, QComboBox, QAbstractSpinBox, QPlainTextEdit {
+            background: #FCFDFB; color: #24465B; border: 1px solid #CFDFE7;
+            border-radius: 8px; padding: 6px 10px; selection-background-color: #DCEEF8; selection-color: #17416B;
+        }
+        QComboBox QLineEdit, QAbstractSpinBox QLineEdit { border: 0; padding: 0; background: transparent; }
+        QLineEdit:focus, QComboBox:focus, QAbstractSpinBox:focus, QPlainTextEdit:focus { border-color: #5599C4; }
+        QLineEdit:disabled, QComboBox:disabled, QAbstractSpinBox:disabled { background: #F2F6F8; color: #8CA0AB; border-color: #E1EDF0; }
+        QPushButton { background: #EFF7FA; color: #315F7B; border: 1px solid #CFDFE7; border-radius: 8px; padding: 6px 10px; }
+        QPushButton:hover { background: #DCEEF8; border-color: #93BED6; }
+        QPushButton:pressed { background: #C8E2F1; }
+        QPushButton:focus { border: 1px solid #387FAB; }
+        QPushButton#saveFood, QPushButton#submitCandidate { background: #2879AC; color: white; border-color: #2879AC; font-weight: 600; }
+        QPushButton#saveFood:hover, QPushButton#submitCandidate:hover { background: #216994; }
+        QPushButton#deleteFood { color: #AF5D61; background: transparent; border-color: #EBDADD; }
+        QPushButton#deleteFood:hover { background: #FCF1F2; }
+        QPushButton:disabled, QPushButton#saveFood:disabled, QPushButton#submitCandidate:disabled, QPushButton#deleteFood:disabled {
+            background: #F0F4F6; color: #94A7B2; border-color: #E1E9ED;
+        }
+        QListWidget { background: #FFFFFF; color: #38586C; border: 1px solid #E1EDF0; border-radius: 10px; padding: 4px; outline: 0; }
+        QListWidget::item { padding: 12px 8px; border-bottom: 1px solid #EDF3F6; }
+        QListWidget::item:selected { background: #DCEEF8; color: #17416B; border-radius: 6px; }
+        QListWidget::item:hover { background: #EFF7FA; }
+        QCheckBox { color: #38586C; spacing: 8px; }
+    )"));
     auto* root = new QHBoxLayout(this);
+    root->setContentsMargins(24, 24, 24, 24);
+    root->setSpacing(16);
     auto* scroll = new QScrollArea(this);
+    scroll->setObjectName("entryScroll");
     scroll->setWidgetResizable(true);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     auto* editor = new QWidget(scroll);
-    auto* layout = new QVBoxLayout(editor);
+    editor->setObjectName("entryEditor");
+    auto* sections = new QVBoxLayout(editor);
+    sections->setContentsMargins(0, 0, 4, 0);
+    sections->setSpacing(16);
+    auto makeCard = [](QWidget* parent) {
+        auto* card = new QFrame(parent);
+        card->setProperty("entryCard", true);
+        return card;
+    };
+    auto heading = [](const QString& text, QWidget* parent) {
+        auto* label = new QLabel(text, parent);
+        label->setProperty("entryHeading", true);
+        label->setWordWrap(true);
+        return label;
+    };
+    auto* recognitionCard = makeCard(editor);
+    auto* layout = new QVBoxLayout(recognitionCard);
+    layout->setContentsMargins(16, 16, 16, 16);
+    layout->setSpacing(12);
+    layout->addWidget(heading("包装日期识别", recognitionCard));
+    sections->addWidget(recognitionCard);
     scroll->setWidget(editor);
-    root->addWidget(scroll, 2);
-    auto* batch = new QVBoxLayout();
-    batch->addWidget(new QLabel("待提交食材（双击可修改）", this));
+    root->addWidget(scroll, 3);
+    auto* batchCard = makeCard(this);
+    batchCard->setMinimumWidth(220);
+    auto* batch = new QVBoxLayout(batchCard);
+    batch->setContentsMargins(16, 16, 16, 16);
+    batch->setSpacing(12);
+    batch->addWidget(heading("待提交食材", batchCard));
+    auto* batchHint = new QLabel("逐项添加后统一提交\n双击列表中的食材可修改", batchCard);
+    batchHint->setProperty("entryHint", true);
+    batchHint->setWordWrap(true);
+    batch->addWidget(batchHint);
     list_ = new QListWidget(this); list_->setObjectName("pendingFoods");
-    list_->setMinimumWidth(280); list_->setWordWrap(true);
-    batch->addWidget(list_);
+    list_->setMinimumWidth(0); list_->setWordWrap(true);
+    list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    batch->addWidget(list_, 1);
     edit_ = new QPushButton("修改选中食材", this); edit_->setObjectName("editFood");
     remove_ = new QPushButton("删除选中食材", this); remove_->setObjectName("deleteFood");
     submit_ = new QPushButton("确认提交全部食材", this); submit_->setObjectName("submitCandidate");
     batch->addWidget(edit_); batch->addWidget(remove_); batch->addWidget(submit_);
-    root->addLayout(batch, 1);
+    root->addWidget(batchCard, 2);
     auto* intro = new QLabel("可直接手动录入，也可识别包装辅助填写日期。逐项添加到右侧列表后，一次提交。", this);
     intro->setWordWrap(true);
+    intro->setProperty("entryHint", true);
     layout->addWidget(intro);
     auto* buttons = new QHBoxLayout();
     choose_ = new QPushButton("导入包装图片", this);
@@ -93,11 +192,12 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     cancel_ = new QPushButton("取消识别", this);
     recognize_->setEnabled(false);
     cancel_->setEnabled(false);
-    buttons->addWidget(choose_); buttons->addWidget(recognize_); buttons->addWidget(cancel_);
+    layout->addWidget(choose_);
+    buttons->setSpacing(12);
+    buttons->addWidget(recognize_); buttons->addWidget(cancel_);
     layout->addLayout(buttons);
-    preview_ = new QLabel("尚未导入包装图片", this);
-    preview_->setAlignment(Qt::AlignCenter);
-    preview_->setFixedHeight(120);
+    preview_ = new PackagingPreview(this);
+    preview_->setObjectName("packagePreview");
     layout->addWidget(preview_);
     raw_ = new QPlainTextEdit(this);
     raw_->setObjectName("packageText");
@@ -111,7 +211,17 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     status_->setTextFormat(Qt::PlainText);
     status_->setWordWrap(true);
     layout->addWidget(status_);
+    auto* foodCard = makeCard(editor);
+    layout = new QVBoxLayout(foodCard);
+    layout->setContentsMargins(16, 16, 16, 16);
+    layout->setSpacing(12);
+    layout->addWidget(heading("食材信息", foodCard));
+    sections->addWidget(foodCard);
+    sections->addStretch();
     auto* form = new QFormLayout();
+    form->setSpacing(12);
+    form->setRowWrapPolicy(QFormLayout::WrapAllRows);
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     name_ = new QLineEdit(this); name_->setObjectName("foodName");
     quantity_ = new QDoubleSpinBox(this); quantity_->setObjectName("foodQuantity");
     quantity_->setDecimals(1); quantity_->setRange(.1, 9999); quantity_->setValue(1);
@@ -144,13 +254,28 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     storageDaysLabel_ = new QLabel("预计保存天数（天）", this);
     form->addRow(storageDaysLabel_, storageDays_);
     layout->addLayout(form);
-    computed_ = new QLabel(this); computed_->setWordWrap(true); computed_->setTextFormat(Qt::PlainText);
+    computed_ = new QLabel(this); computed_->setObjectName("entrySummary"); computed_->setWordWrap(true); computed_->setTextFormat(Qt::PlainText);
     layout->addWidget(computed_);
-    confirmed_ = new QCheckBox("已核对当前食材信息和日期（如未知，已明确选择未知）", this);
+    confirmed_ = new QCheckBox("已核对当前食材信息和日期\n（如未知，已明确选择未知）", this);
     confirmed_->setObjectName("confirmed"); layout->addWidget(confirmed_);
     save_ = new QPushButton("添加食材到列表", this); save_->setObjectName("saveFood");
     reset_ = new QPushButton("清空表单 / 取消修改", this); reset_->setObjectName("resetForm");
     layout->addWidget(save_); layout->addWidget(reset_);
+    for (auto* button : findChildren<QPushButton*>()) {
+        button->setMinimumHeight(36);
+        button->setCursor(Qt::PointingHandCursor);
+    }
+    for (auto* field : findChildren<QLineEdit*>()) {
+        if (!qobject_cast<QAbstractSpinBox*>(field->parentWidget()) && !qobject_cast<QComboBox*>(field->parentWidget()))
+            field->setMinimumHeight(36);
+    }
+    for (auto* field : findChildren<QAbstractSpinBox*>()) field->setMinimumHeight(36);
+    for (auto* field : findChildren<QComboBox*>()) {
+        field->setMinimumHeight(36);
+        field->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        field->setMinimumContentsLength(8);
+        field->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    }
     connect(choose_, &QPushButton::clicked, this, &PackagingEntryWidget::chooseImage);
     connect(parse_, &QPushButton::clicked, this, &PackagingEntryWidget::parseText);
     connect(cancel_, &QPushButton::clicked, &ocr_, &ReceiptOcrService::cancel);
@@ -259,7 +384,7 @@ void PackagingEntryWidget::chooseImage()
     const auto image = reader.read();
     if (image.isNull()) { status_->setText("图片无法读取，请重新选择"); return; }
     imagePath_ = path;
-    preview_->setPixmap(QPixmap::fromImage(image).scaled(600, 120, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    static_cast<PackagingPreview*>(preview_)->showImage(image);
     raw_->clear(); production_->clear(); expiry_->clear(); period_->setValue(0); mode_->setCurrentIndex(0);
     confirmed_->setChecked(false); recognize_->setEnabled(true);
     status_->setText("图片已导入，请识别包装文字");
@@ -366,7 +491,7 @@ void PackagingEntryWidget::clearForm()
     period_->setValue(0); periodUnit_->setCurrentIndex(0); mode_->setCurrentIndex(0);
     unitWeight_->setValue(0);
     unit_->setCurrentIndex(0); quantity_->setValue(1); confirmed_->setChecked(false);
-    imagePath_.clear(); preview_->clear(); preview_->setText("尚未导入包装图片");
+    imagePath_.clear(); static_cast<PackagingPreview*>(preview_)->showImage(QImage());
     recognize_->setEnabled(false); list_->clearSelection(); list_->setCurrentRow(-1);
     status_->setText("可直接手动录入下一件，或导入新的包装图片。");
     refresh();
@@ -393,7 +518,7 @@ void PackagingEntryWidget::editSelected()
     imagePath_ = entry.imagePath;
     if (!imagePath_.isEmpty()) {
         QImageReader reader(imagePath_); reader.setAutoTransform(true);
-        preview_->setPixmap(QPixmap::fromImage(reader.read()).scaled(600,120,Qt::KeepAspectRatio,Qt::SmoothTransformation));
+        static_cast<PackagingPreview*>(preview_)->showImage(reader.read());
     }
     recognize_->setEnabled(!imagePath_.isEmpty());
     editingRow_ = row; confirmed_->setChecked(false);
