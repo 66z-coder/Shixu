@@ -115,11 +115,11 @@ StatisticsWidget::StatisticsWidget(RewardSystem *rewards, QWidget *parent,
     layout->addStretch();
 
     setStyleSheet(QStringLiteral(R"(
-        QFrame#statCard { background: #F8FAF7; border: 1px solid #E4EAE2; border-radius: 10px; }
-        QLabel#statCaption { color: #77867B; font-size: 13px; }
-        QLabel[statMetric="true"] { color: #246B45; font-size: 22px; font-weight: 700; }
-        QLabel#statSectionTitle { color: #26352C; font-size: 17px; font-weight: 600; }
-        QLabel#statDay { color: #43534A; font-size: 14px; }
+        QFrame#statCard { background: #FFFFFF; border: 1px solid #DCE8EF; border-radius: 10px; }
+        QLabel#statCaption { color: #6C8392; font-size: 13px; }
+        QLabel[statMetric="true"] { color: #287BA8; font-size: 22px; font-weight: 700; }
+        QLabel#statSectionTitle { color: #28485D; font-size: 17px; font-weight: 600; }
+        QLabel#statDay { color: #476577; font-size: 14px; }
     )"));
 
     connect(m_rewards, &RewardSystem::changed, this, [this] { refresh(); });
@@ -131,6 +131,9 @@ StatisticsWidget::StatisticsWidget(RewardSystem *rewards, QWidget *parent,
 }
 
 void StatisticsWidget::refresh() {
+    if (auto *grid = findChild<QWidget *>("achievementGrid"))
+        grid->hide();
+    m_cookingAchievements->show();
     const auto growth =
         m_rewards->getGrowthSnapshot(Shixu::appNow().date().toString(Qt::ISODate).toStdString());
     if (growth.outcome.status != Shixu::Contracts::V1::OperationStatus::Succeeded) {
@@ -210,4 +213,24 @@ void StatisticsWidget::refresh() {
                            QString::fromUtf8(d.condition));
     }
     m_cookingAchievements->setText(badges.join("\n\n"));
+    auto *grid = findChild<QWidget *>("achievementGrid");
+    if (!grid) {
+        grid = new QWidget(m_cookingAchievements->parentWidget());
+        grid->setObjectName("achievementGrid");
+        auto *cards = new QGridLayout(grid);
+        for (int i = 0; i < 4; ++i) {
+            auto *label = new QLabel(grid);
+            label->setObjectName(QString("badge%1").arg(i));
+            label->setWordWrap(true);
+            label->setTextFormat(Qt::PlainText);
+            label->setStyleSheet(
+                "background:#EFF7FC;border:1px solid #D4E7F1;border-radius:10px;padding:16px;");
+            cards->addWidget(label, i / 2, i % 2);
+        }
+        m_cookingAchievements->parentWidget()->layout()->addWidget(grid);
+    }
+    for (int i = 0; i < badges.size(); ++i)
+        grid->findChild<QLabel *>(QString("badge%1").arg(i))->setText(badges[i]);
+    grid->show();
+    m_cookingAchievements->hide();
 }
