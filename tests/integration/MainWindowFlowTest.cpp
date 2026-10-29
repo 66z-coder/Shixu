@@ -61,6 +61,7 @@ int main(int argc, char **argv) {
                 if (!widgets.isEmpty()) {
                     phase = 1;
                     widgets.first()->findChild<QPushButton *>("recipeComplete")->click();
+                    widgets.first()->findChild<QPushButton *>("recipeComplete")->click();
                 }
                 return;
             }

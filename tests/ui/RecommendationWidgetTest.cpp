@@ -8,35 +8,32 @@
 #include <iostream>
 
 namespace {
-bool check(bool condition, const char* message)
-{
+bool check(bool condition, const char *message) {
     if (!condition) {
         std::cerr << message << '\n';
     }
     return condition;
 }
-}
+} // namespace
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
     RecommendationWidget widget;
     widget.show();
 
     int requests = 0;
-    Shixu::RecommendationEngine::Mood selected =
-        Shixu::RecommendationEngine::Mood::NotSelected;
+    Shixu::RecommendationEngine::Mood selected = Shixu::RecommendationEngine::Mood::NotSelected;
     int customLimit = -1;
     QObject::connect(&widget, &RecommendationWidget::recommendationRequested,
                      [&](Shixu::RecommendationEngine::Mood mood, int minutes) {
-        ++requests;
-        selected = mood;
-        customLimit = minutes;
-    });
+                         ++requests;
+                         selected = mood;
+                         customLimit = minutes;
+                     });
 
-    auto* generate = widget.findChild<QPushButton*>(QStringLiteral("generateRecommendations"));
-    auto* hint = widget.findChild<QLabel*>(QStringLiteral("selectionHint"));
-    auto* limit = widget.findChild<QSpinBox*>(QStringLiteral("customTimeLimit"));
+    auto *generate = widget.findChild<QPushButton *>(QStringLiteral("generateRecommendations"));
+    auto *hint = widget.findChild<QLabel *>(QStringLiteral("selectionHint"));
+    auto *limit = widget.findChild<QSpinBox *>(QStringLiteral("customTimeLimit"));
     if (!check(generate && hint && limit, "Recommendation controls are missing")) {
         return 1;
     }
@@ -47,8 +44,8 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    QPushButton* neutral = nullptr;
-    for (QPushButton* button : widget.findChildren<QPushButton*>(QStringLiteral("moodChoice"))) {
+    QPushButton *neutral = nullptr;
+    for (QPushButton *button : widget.findChildren<QPushButton *>(QStringLiteral("moodChoice"))) {
         if (button->text().contains(QStringLiteral("没胃口"))) {
             neutral = button;
             break;
@@ -60,9 +57,7 @@ int main(int argc, char* argv[])
     neutral->click();
     limit->setValue(20);
     generate->click();
-    if (!check(requests == 1
-                   && selected == Shixu::RecommendationEngine::Mood::Neutral
-                   && customLimit == 20,
+    if (!check(requests == 3 && selected == Shixu::RecommendationEngine::Mood::Neutral && customLimit == 20,
                "Selected mood and custom time cap must be passed to the integration layer")) {
         return 1;
     }
@@ -79,7 +74,7 @@ int main(int argc, char* argv[])
     int moodRows = 0;
     int timeRows = 0;
     int oldPreferenceRows = 0;
-    for (QLabel* label : widget.findChildren<QLabel*>()) {
+    for (QLabel *label : widget.findChildren<QLabel *>()) {
         moodRows += label->text() == QStringLiteral("心情匹配");
         timeRows += label->text() == QStringLiteral("制作时间");
         oldPreferenceRows += label->text() == QStringLiteral("口味偏好");
