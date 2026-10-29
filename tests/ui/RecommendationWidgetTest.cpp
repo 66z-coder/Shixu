@@ -49,7 +49,7 @@ int main(int argc, char* argv[])
 
     QPushButton* neutral = nullptr;
     for (QPushButton* button : widget.findChildren<QPushButton*>(QStringLiteral("moodChoice"))) {
-        if (button->text().contains(QStringLiteral("状态一般"))) {
+        if (button->text().contains(QStringLiteral("没胃口"))) {
             neutral = button;
             break;
         }

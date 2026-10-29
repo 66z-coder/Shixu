@@ -21,6 +21,7 @@ private:
     Shixu::Contracts::V1::CookingCompletionRequest m_request;
     QString m_token;
     bool m_busy = false;
+    bool m_allowChoices = false;
     QLabel* m_title = nullptr;
     QLabel* m_status = nullptr;
     QVBoxLayout* m_missing = nullptr;

@@ -105,6 +105,30 @@ void InventoryManager::addFood(const FoodCandidate& candidate)
     if (!addFoods({candidate}, &error)) qWarning() << "Add food failed:" << error;
 }
 
+bool InventoryManager::normalizeNames(const std::function<QString(const QString&)>& normalize, QString* error)
+{
+    if(error) error->clear();
+    auto fail=[&](const QString& message){database.rollback();if(error)*error=message;return false;};
+    if(!initializationError_.isEmpty() || !database.transaction())
+        return fail(QStringLiteral("无法读取旧库存名称。"));
+    QSqlQuery query(database);
+    if(!query.exec("SELECT id,name FROM foods WHERE quantity>0"))return fail(query.lastError().text());
+    QList<QPair<qint64,QString>> changes;
+    while(query.next()){
+        auto old=query.value(1).toString(), name=normalize(old);
+        if(name.isEmpty())return fail(QStringLiteral("库存名称无法规范化。"));
+        if(name!=old)changes.append({query.value(0).toLongLong(),name});
+    }
+    query.finish();
+    for(const auto& item:changes){
+        query.prepare("UPDATE foods SET name=? WHERE id=?");query.addBindValue(item.second);query.addBindValue(item.first);
+        if(!query.exec())return fail(query.lastError().text());
+    }
+    if(!changes.isEmpty()&&!query.exec("UPDATE shixu_inventory_meta SET revision=revision+1 WHERE id=1"))return fail(query.lastError().text());
+    if(!database.commit())return fail(database.lastError().text());
+    return true;
+}
+
 bool InventoryManager::addFoods(const QList<FoodCandidate>& foods, QString* error)
 {
     if (error) error->clear();

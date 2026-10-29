@@ -66,3 +66,8 @@ ocr/models/
 ocr/.downloads/
 __pycache__/
 *.pyc
+
+# Local application data (keep test fixtures tracked).
+/shixu.db*
+/cooking_events.sqlite*
+/meal_records.txt

@@ -47,6 +47,7 @@ void CookingConfirmationWidget::setPreview(const Shixu::Contracts::V1::CookingCo
 {
     namespace V = Shixu::Contracts::V1;
     m_request = preview.snapshot.request;
+    m_allowChoices = preview.outcome.status == V::OperationStatus::NeedsConfirmation;
     m_token = preview.outcome.status == V::OperationStatus::Succeeded
         ? text(preview.confirmationToken) : QString();
     // A fresh successful preview replaces the previous retry state.
@@ -100,6 +101,7 @@ void CookingConfirmationWidget::setProgress(const Shixu::Contracts::V1::CookingC
 void CookingConfirmationWidget::setBusy(bool busy)
 {
     m_busy = busy;
+    for (auto* check : findChildren<QCheckBox*>()) check->setEnabled(!busy && m_allowChoices && m_retry->isHidden());
     m_confirm->setEnabled(!busy && !m_token.isEmpty() && !m_retry->isVisible());
     m_retry->setEnabled(!busy);
     m_cancelPrepared->setEnabled(!busy);
