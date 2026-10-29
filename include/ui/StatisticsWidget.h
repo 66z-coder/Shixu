@@ -16,6 +16,7 @@ private:
 
     RewardSystem* m_rewards;
     QLabel* m_total = nullptr;
+    QLabel* m_cooking = nullptr;
     QLabel* m_streak = nullptr;
     QLabel* m_points = nullptr;
     QLabel* m_achievements = nullptr;

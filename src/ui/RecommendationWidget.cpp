@@ -1,10 +1,12 @@
 #include "ui/RecommendationWidget.h"
 
 #include <QButtonGroup>
+#include <QDate>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLayoutItem>
+#include <QMetaMethod>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScrollArea>
@@ -17,6 +19,20 @@
 namespace {
 
 using Mood = Shixu::RecommendationEngine::Mood;
+
+// Map only for the old MainWindow route; V1 service uses the five-choice enum directly.
+Mood legacyMood(Shixu::Contracts::V1::Mood mood)
+{
+    using New = Shixu::Contracts::V1::Mood;
+    switch (mood) {
+    case New::Tired: return Mood::Tired;
+    case New::WantGoodFood:
+    case New::TreatMyself: return Mood::ReadyToCook;
+    case New::LowAppetite:
+    case New::WantLight: return Mood::Neutral;
+    default: return Mood::NotSelected;
+    }
+}
 
 QLabel* makeLabel(const QString& text, const QString& objectName, QWidget* parent)
 {
@@ -152,33 +168,35 @@ RecommendationWidget::RecommendationWidget(QWidget* parent)
     controlsLayout->addWidget(makeLabel(QStringLiteral("今天想怎么做饭？"),
                                          QStringLiteral("controlsTitle"), controls));
     controlsLayout->addWidget(makeLabel(
-        QStringLiteral("先选一个心情。它会决定推荐菜谱的最长制作时间。"),
+        QStringLiteral("先选今天的心情，再按需要调整制作时间和方向。"),
         QStringLiteral("controlsDescription"), controls));
 
     m_moodButtons = new QButtonGroup(this);
     m_moodButtons->setExclusive(true);
     auto* moodRow = new QHBoxLayout;
     moodRow->setSpacing(10);
-    const struct { Mood mood; const char* name; int minutes; } choices[] = {
-        {Mood::ReadyToCook, "有心情做饭", 60},
-        {Mood::Neutral, "状态一般", 30},
-        {Mood::Tired, "疲惫、想省事", 15},
+    using VMood = Shixu::Contracts::V1::Mood;
+    const struct { VMood mood; const char* name; int minutes; } choices[] = {
+        {VMood::Tired, "很累", 30},
+        {VMood::WantGoodFood, "想吃点好的", 45},
+        {VMood::LowAppetite, "没胃口", 30},
+        {VMood::WantLight, "想清爽一点", 40},
+        {VMood::TreatMyself, "想犒劳自己", 75},
     };
     for (const auto& choice : choices) {
         auto* button = new QPushButton(
-            QStringLiteral("%1\n最多 %2 分钟")
-                .arg(QString::fromUtf8(choice.name))
-                .arg(choice.minutes),
-            controls);
+            QStringLiteral("%1\n默认 %2 分钟")
+                .arg(QString::fromUtf8(choice.name)).arg(choice.minutes), controls);
         button->setObjectName(QStringLiteral("moodChoice"));
         button->setCheckable(true);
         button->setMinimumHeight(68);
-        button->setCursor(Qt::PointingHandCursor);
         m_moodButtons->addButton(button, static_cast<int>(choice.mood));
         moodRow->addWidget(button, 1);
         connect(button, &QPushButton::clicked, this, [this, choice] {
-            m_selectionHint->hide();
-            emit moodSelected(choice.mood);
+            selectMoodV1(choice.mood);
+            if (!isSignalConnected(QMetaMethod::fromSignal(&RecommendationWidget::moodSelectedV1)))
+                emit moodSelected(legacyMood(choice.mood));
+            emit moodSelectedV1(choice.mood);
         });
     }
     controlsLayout->addLayout(moodRow);
@@ -189,15 +207,23 @@ RecommendationWidget::RecommendationWidget(QWidget* parent)
     m_customLimit = new QSpinBox(controls);
     m_customLimit->setObjectName(QStringLiteral("customTimeLimit"));
     m_customLimit->setRange(0, 240);
-    m_customLimit->setSpecialValueText(QStringLiteral("不额外限制"));
+    m_customLimit->setSpecialValueText(QStringLiteral("请先选择心情"));
     m_customLimit->setSuffix(QStringLiteral(" 分钟"));
     m_customLimit->setValue(0);
     limitRow->addWidget(m_customLimit);
     limitRow->addStretch();
     controlsLayout->addLayout(limitRow);
     controlsLayout->addWidget(makeLabel(
-        QStringLiteral("填写后，会与心情对应的时间上限取较短值。"),
+        QStringLiteral("这里是最终时间上限，选择心情会先填入默认值。"),
         QStringLiteral("limitHelp"), controls));
+
+    m_quickLayout = new QVBoxLayout;
+    controlsLayout->addLayout(m_quickLayout);
+    m_policyHint = makeLabel(QStringLiteral("库存方式：可补购"),
+                             QStringLiteral("limitHelp"), controls);
+    controlsLayout->addWidget(m_policyHint);
+    connect(m_customLimit, QOverload<int>::of(&QSpinBox::valueChanged), this,
+            [this] { resetExcludedRecipeIds(); });
 
     m_selectionHint = makeLabel(QStringLiteral("请先选择今天的心情。"),
                                  QStringLiteral("selectionHint"), controls);
@@ -241,6 +267,15 @@ RecommendationWidget::RecommendationWidget(QWidget* parent)
     m_resultsLayout->setContentsMargins(0, 0, 0, 0);
     m_resultsLayout->setSpacing(14);
     bodyLayout->addWidget(results);
+    m_swapButton = new QPushButton(QStringLiteral("换一批"), body);
+    m_swapButton->setObjectName(QStringLiteral("generateRecommendations"));
+    m_swapButton->hide();
+    bodyLayout->addWidget(m_swapButton);
+    connect(m_swapButton, &QPushButton::clicked, this, [this] {
+        m_excludedIds.insert(m_excludedIds.end(), m_visibleIds.begin(), m_visibleIds.end());
+        m_visibleIds.clear();
+        sendV1Request();
+    });
     bodyLayout->addStretch();
 
     setStyleSheet(QStringLiteral(R"(
@@ -295,23 +330,19 @@ RecommendationWidget::RecommendationWidget(QWidget* parent)
 
 void RecommendationWidget::selectMood(Shixu::RecommendationEngine::Mood mood)
 {
-    if (QPushButton* button = qobject_cast<QPushButton*>(
-            m_moodButtons->button(static_cast<int>(mood)))) {
-        button->setChecked(true);
-        m_customLimit->setValue(0);
-        m_selectionHint->hide();
+    using Old = Shixu::RecommendationEngine::Mood;
+    using New = Shixu::Contracts::V1::Mood;
+    switch (mood) {
+    case Old::ReadyToCook: selectMoodV1(New::WantGoodFood); break;
+    case Old::Neutral: selectMoodV1(New::LowAppetite); break;
+    case Old::Tired: selectMoodV1(New::Tired); break;
+    default: break;
     }
 }
 
 void RecommendationWidget::requestRecommendations()
 {
-    const int selected = m_moodButtons->checkedId();
-    if (selected < 0) {
-        m_selectionHint->show();
-        return;
-    }
-    m_selectionHint->hide();
-    emit recommendationRequested(static_cast<Mood>(selected), m_customLimit->value());
+    sendV1Request();
 }
 
 void RecommendationWidget::setWarnings(const QStringList& warnings)
@@ -344,5 +375,181 @@ void RecommendationWidget::setRecommendations(const QVector<RecommendationViewIt
     m_summary->setText(QStringLiteral("为你找到 %1 道推荐菜谱").arg(items.size()));
     for (int index = 0; index < items.size(); ++index) {
         m_resultsLayout->addWidget(makeResultCard(items.at(index), index + 1, this));
+    }
+}
+
+void RecommendationWidget::resetExcludedRecipeIds()
+{
+    m_excludedIds.clear();
+    m_visibleIds.clear();
+    if (m_swapButton) m_swapButton->hide();
+}
+
+void RecommendationWidget::selectMoodV1(Shixu::Contracts::V1::Mood mood)
+{
+    namespace V = Shixu::Contracts::V1;
+    int minutes = 0;
+    switch (mood) {
+    case V::Mood::Tired: minutes = 30; break;
+    case V::Mood::WantGoodFood: minutes = 45; break;
+    case V::Mood::LowAppetite: minutes = 30; break;
+    case V::Mood::WantLight: minutes = 40; break;
+    case V::Mood::TreatMyself: minutes = 75; break;
+    default: break;
+    }
+    if (minutes == 0) return;
+    m_moodV1 = mood;
+    m_refinement = V::Refinement::None;
+    m_policy = V::InventoryPolicy::PreferInventory;
+    m_policyHint->setText(QStringLiteral("库存方式：可补购"));
+    m_customLimit->setValue(minutes);
+    resetExcludedRecipeIds();
+    if (auto* button = qobject_cast<QPushButton*>(m_moodButtons->button(static_cast<int>(mood))))
+        button->setChecked(true);
+    m_selectionHint->hide();
+    updateQuickButtons();
+}
+
+void RecommendationWidget::updateQuickButtons()
+{
+    namespace V = Shixu::Contracts::V1;
+    while (auto* item = m_quickLayout->takeAt(0)) {
+        if (auto* widget = item->widget()) delete widget;
+        delete item;
+    }
+    struct Quick { const char* label; V::Refinement refinement; V::InventoryPolicy policy; bool shortTime; };
+    const Quick tired[] = {{"更简单", V::Refinement::Simpler, V::InventoryPolicy::PreferInventory, false},
+                           {"不吃面", V::Refinement::NoNoodles, V::InventoryPolicy::PreferInventory, false},
+                           {"只用冰箱里的", V::Refinement::None, V::InventoryPolicy::OnlyInventory, false}};
+    const Quick good[] = {{"更丰盛", V::Refinement::Heartier, V::InventoryPolicy::PreferInventory, false},
+                          {"清淡一点", V::Refinement::Lighter, V::InventoryPolicy::PreferInventory, false},
+                          {"只用冰箱里的", V::Refinement::None, V::InventoryPolicy::OnlyInventory, false}};
+    const Quick appetite[] = {{"更开胃", V::Refinement::MoreAppetizing, V::InventoryPolicy::PreferInventory, false},
+                              {"清淡一点", V::Refinement::Lighter, V::InventoryPolicy::PreferInventory, false},
+                              {"更简单", V::Refinement::Simpler, V::InventoryPolicy::PreferInventory, false}};
+    const Quick light[] = {{"多点蔬菜", V::Refinement::MoreVegetables, V::InventoryPolicy::PreferInventory, false},
+                           {"多点蛋白质", V::Refinement::MoreProtein, V::InventoryPolicy::PreferInventory, false},
+                           {"更简单", V::Refinement::Simpler, V::InventoryPolicy::PreferInventory, false}};
+    const Quick treat[] = {{"更有特色", V::Refinement::MoreSpecial, V::InventoryPolicy::PreferInventory, false},
+                           {"少量补购", V::Refinement::None, V::InventoryPolicy::SmallPurchase, false},
+                           {"时间短一点", V::Refinement::None, V::InventoryPolicy::PreferInventory, true}};
+    const Quick* choices = nullptr;
+    switch (m_moodV1) {
+    case V::Mood::Tired: choices = tired; break;
+    case V::Mood::WantGoodFood: choices = good; break;
+    case V::Mood::LowAppetite: choices = appetite; break;
+    case V::Mood::WantLight: choices = light; break;
+    case V::Mood::TreatMyself: choices = treat; break;
+    default: return;
+    }
+    auto* row = new QWidget(this);
+    auto* layout = new QHBoxLayout(row);
+    layout->setContentsMargins(0, 0, 0, 0);
+    for (int i = 0; i < 3; ++i) {
+        const Quick quick = choices[i];
+        auto* button = new QPushButton(QString::fromUtf8(quick.label), row);
+        button->setObjectName(QStringLiteral("moodChoice"));
+        button->setCheckable(!quick.shortTime);
+        button->setChecked(quick.refinement != V::Refinement::None
+            ? m_refinement == quick.refinement : (!quick.shortTime && m_policy == quick.policy && quick.policy != V::InventoryPolicy::PreferInventory));
+        layout->addWidget(button);
+        connect(button, &QPushButton::clicked, this, [this, quick] {
+            if (quick.shortTime) {
+                if (m_customLimit->value() > 45) m_customLimit->setValue(45);
+                else m_selectionHint->setText(QStringLiteral("当前已在 45 分钟内。"));
+            } else if (quick.refinement != V::Refinement::None) {
+                m_refinement = m_refinement == quick.refinement ? V::Refinement::None : quick.refinement;
+            } else {
+                m_policy = m_policy == quick.policy ? V::InventoryPolicy::PreferInventory : quick.policy;
+            }
+            m_policyHint->setText(m_policy == V::InventoryPolicy::OnlyInventory
+                ? QStringLiteral("库存方式：只用冰箱里的") : m_policy == V::InventoryPolicy::SmallPurchase
+                ? QStringLiteral("库存方式：少量补购") : QStringLiteral("库存方式：可补购"));
+            resetExcludedRecipeIds();
+            updateQuickButtons();
+            sendV1Request();
+        });
+    }
+    m_quickLayout->addWidget(row);
+}
+
+void RecommendationWidget::sendV1Request()
+{
+    namespace V = Shixu::Contracts::V1;
+    if (m_moodV1 == V::Mood::NotSelected || m_customLimit->value() <= 0) {
+        m_selectionHint->setText(QStringLiteral("请先选择今天的心情。"));
+        m_selectionHint->show();
+        return;
+    }
+    m_selectionHint->hide();
+    V::RecommendationPreferences preferences;
+    preferences.mood = m_moodV1;
+    preferences.maxPreparationMinutes = m_customLimit->value();
+    preferences.inventoryPolicy = m_policy;
+    preferences.refinement = m_refinement;
+    preferences.excludedRecipeIds = m_excludedIds;
+    preferences.servings = 1;
+    preferences.referenceDate = QDate::currentDate().toString(Qt::ISODate).toStdString();
+    if (!isSignalConnected(QMetaMethod::fromSignal(
+            &RecommendationWidget::recommendationRequestedV1)))
+        emit recommendationRequested(legacyMood(m_moodV1), preferences.maxPreparationMinutes);
+    emit recommendationRequestedV1(preferences);
+}
+
+void RecommendationWidget::setRecommendationResult(const Shixu::Contracts::V1::RecommendationResult& result)
+{
+    namespace V = Shixu::Contracts::V1;
+    while (auto* item = m_resultsLayout->takeAt(0)) {
+        if (auto* widget = item->widget()) delete widget;
+        delete item;
+    }
+    m_visibleIds.clear();
+    m_swapButton->setVisible(result.outcome.status == V::OperationStatus::Succeeded && result.hasMore);
+    const bool failed = result.outcome.status != V::OperationStatus::Succeeded;
+    m_emptyState->setVisible(failed || result.cards.empty());
+    m_summary->setVisible(!failed && !result.cards.empty());
+    if (failed) {
+        m_emptyTitle->setText(QStringLiteral("推荐暂时不可用"));
+        m_emptyDescription->setText(QString::fromUtf8(result.outcome.message.c_str()));
+        return;
+    }
+    if (result.cards.empty()) {
+        m_emptyTitle->setText(QStringLiteral("暂时没有符合条件的菜谱"));
+        m_emptyDescription->setText(QStringLiteral("可以放宽时间或库存方式后重试。"));
+        return;
+    }
+    m_summary->setText(QStringLiteral("为你找到 %1 道菜").arg(result.cards.size()));
+    for (const auto& card : result.cards) {
+        m_visibleIds.push_back(card.recipeId);
+        const QString role = card.role == V::CardRole::Primary ? QStringLiteral("首选")
+            : card.role == V::CardRole::AlternativeOne ? QStringLiteral("备选一") : QStringLiteral("备选二");
+        auto* frame = new QFrame(this);
+        frame->setObjectName(QStringLiteral("recommendationCard"));
+        auto* layout = new QVBoxLayout(frame);
+        layout->addWidget(makeLabel(role + QStringLiteral(" · ") + card.dishName,
+                                     QStringLiteral("dishName"), frame));
+        layout->addWidget(makeLabel(QStringLiteral("约 %1 分钟 · 综合 %2 分")
+                                     .arg(card.recipe.cookingTimeMinutes).arg(card.totalScore, 0, 'f', 1),
+                                     QStringLiteral("timeInfo"), frame));
+        layout->addWidget(makeLabel(QStringLiteral("制作时间得分 %1 · 食材匹配 %2")
+                                     .arg(card.preparationTimeScore, 0, 'f', 1)
+                                     .arg(card.ingredientMatchScore, 0, 'f', 1),
+                                     QStringLiteral("recommendationReason"), frame));
+        for (const auto& availability : card.availability) {
+            if (availability.state == V::AvailabilityState::Enough) continue;
+            const QString name = QString::fromUtf8(availability.foodName.c_str());
+            auto* label = makeLabel(availability.state == V::AvailabilityState::Unknown
+                ? QStringLiteral("%1：库存重量未知").arg(name)
+                : QStringLiteral("%1：还差约 %2 克").arg(name).arg(availability.knownGapGrams, 0, 'f', 0),
+                QStringLiteral("missingIngredients"), frame);
+            layout->addWidget(label);
+        }
+        for (const QString& reason : card.reasons)
+            layout->addWidget(makeLabel(reason, QStringLiteral("recommendationReason"), frame));
+        auto* detail = new QPushButton(QStringLiteral("查看菜谱详情"), frame);
+        detail->setObjectName(QStringLiteral("generateRecommendations"));
+        layout->addWidget(detail);
+        connect(detail, &QPushButton::clicked, this, [this, id = card.recipeId] { emit recipeSelected(id); });
+        m_resultsLayout->addWidget(frame);
     }
 }
