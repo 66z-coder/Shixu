@@ -137,6 +137,14 @@ QueryResult<Recipe> RecipeContractAdapter::findRecipeById(RecipeId id) const
     return result;
 }
 
+QueryResult<std::vector<MealRecord>> RecipeContractAdapter::getAllMeals() const
+{
+    MealRecordStorage::clearLastError();
+    auto meals = MealRecordStorage::loadAll();
+    if (!MealRecordStorage::getLastError().empty()) return {storageFailure("load all meals"), {}};
+    return {ok(), std::move(meals)};
+}
+
 QueryResult<std::vector<MealRecord>> RecipeContractAdapter::getMealsByDate(
     const LocalDate& date) const
 {

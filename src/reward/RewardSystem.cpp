@@ -1,3 +1,4 @@
+#include "core/AppClock.h"
 #include "reward/RewardSystem.h"
 
 #include <QDateTime>
@@ -219,7 +220,7 @@ bool RewardSystem::persist(const QSet<QString>& dates,
 bool RewardSystem::checkIn()
 {
     if (m_loadError) return false;
-    const QString today = dateKey(QDate::currentDate());
+    const QString today = dateKey(Shixu::appNow().date());
     if (m_dates.contains(today)) return false;
     QSet<QString> nextDates = m_dates;
     nextDates.insert(today);
@@ -235,7 +236,7 @@ bool RewardSystem::hasCheckedIn(const QDate& date) const
 }
 int RewardSystem::totalCheckIns() const { return m_dates.size(); }
 int RewardSystem::totalCookingCount() const { return m_events.size(); }
-int RewardSystem::currentStreak() const { return streakAt(m_dates, QDate::currentDate()); }
+int RewardSystem::currentStreak() const { return streakAt(m_dates, Shixu::appNow().date()); }
 int RewardSystem::bestStreak() const { return bestStreakFor(m_dates); }
 int RewardSystem::points() const { return totalPoints(m_dates, m_events); }
 int RewardSystem::unlockedAchievementCount() const

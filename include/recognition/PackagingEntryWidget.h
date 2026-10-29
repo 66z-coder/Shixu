@@ -21,9 +21,12 @@ public:
     explicit PackagingEntryWidget(QWidget* parent = nullptr);
     // Receiver must acknowledge each foodsConfirmed submission.
     void completeSubmission(bool success, const QString& message = QString());
+    // Shared import path for file picker, local file drop and integration callers.
+    bool loadImageFile(const QString& path);
 signals:
     void foodsConfirmed(const std::vector<FoodCandidate>& foods);
 private:
+    bool eventFilter(QObject* watched, QEvent* event) override;
     void chooseImage();
     void parseText();
     void refresh();

@@ -535,6 +535,22 @@ class Coordinator final : public ICookingCompletionService {
         previews.erase(id);
         return e.progress;
     }
+    QueryResult<std::vector<CookingCompletionDetails>> getCompletedCompletions() const override {
+        QueryResult<std::vector<CookingCompletionDetails>> out;
+        if (!ready) {out.outcome=failure(ErrorCode::StorageFailure,"无法打开做饭进度记录。");return out;}
+        QSqlQuery query(db);
+        if (!query.exec("SELECT event_id,payload FROM cooking_completions ORDER BY event_id")) {
+            out.outcome=failure(ErrorCode::StorageFailure,"无法读取做饭历史。");return out;
+        }
+        while(query.next()) {
+            Entry e;
+            if(!decode(query.value(1).toByteArray(),e)||q(e.progress.eventId)!=query.value(0).toString()) {
+                out.value.clear();out.outcome=failure(ErrorCode::InvalidData,"做饭进度记录已损坏。");return out;
+            }
+            if(e.progress.stage==CompletionStage::Completed)out.value.push_back({e.snapshot,e.progress});
+        }
+        out.outcome=success();return out;
+    }
     QueryResult<std::vector<CookingCompletionResult>> getPendingCompletions() const override {
         QueryResult<std::vector<CookingCompletionResult>> out;
         if (!ready) {
