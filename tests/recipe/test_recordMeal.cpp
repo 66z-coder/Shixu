@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -14,6 +15,8 @@
 #include "recipe/RecipeService.h"
 
 namespace {
+
+namespace fs = std::filesystem;
 
 constexpr const char* kTestPath = "meal_records_test.txt";
 constexpr double kEps = 0.01;
@@ -269,25 +272,29 @@ int main()
     }
     removeFileIfExists(kTestPath);
 
-    // ---- Case 10: 文件中混入损坏行，跳过不崩溃，不影响正常记录 ----
+    // ---- Case 10: 文件中混入损坏行 → 严格模式返回 InvalidData ----
+    // v1.md 要求：损坏文件不得静默跳行覆盖丢失记录，
+    // 必须明确返回 InvalidData。
     {
-        std::cout << "[Case 10] 损坏行被跳过不崩溃" << std::endl;
+        std::cout << "[Case 10] 损坏文件应返回 InvalidData（严格模式）" << std::endl;
         MealRecordStorage::clearLastError();
 
-        // 手动构造一个包含损坏行的测试文件
+        // 手动构造一个包含损坏行的测试文件（V1 格式，无 V2 头）
         {
             std::ofstream out(kTestPath, std::ios::binary);
-            out << "1|番茄炒蛋|1|2026-10-20 08:00:00|200|10|20|30\n";    // 正常
-            out << "garbage line with no structure at all\n";              // 损坏：字段不够
-            out << "abc|def|ghi\n";                                        // 损坏：字段不够
-            out << "2|宫保鸡丁|2|2026-10-20 19:00:00|400|20|40|60\n";       // 正常
+            out << "1|番茄炒蛋|1|2026-10-20 08:00:00|200|10|20|30\n";    // 正常 V1
+            out << "garbage line with no structure at all\n";              // 损坏
+            out << "2|宫保鸡丁|2|2026-10-20 19:00:00|400|20|40|60\n";       // 正常 V1
         }
 
+        // 严格 loadAll：首行是合法 V1（不是 V2 头）→ 解析成功；
+        // 第二行是垃圾 → 严格模式 InvalidData → 空返回 + lastError 非空。
         const auto all = MealRecordStorage::loadAll();
-        check(all.size() == 2, "损坏行应被跳过，只加载 2 条正常记录");
-        check(all[0].recipeId == 1, "第 1 条 = 番茄炒蛋");
-        check(all[1].recipeId == 2, "第 2 条 = 宫保鸡丁");
-        check(MealRecordStorage::getLastError().empty(), "静默跳过不应设置 lastError");
+        check(all.empty(), "损坏行触发严格 InvalidData → 返回空");
+        const std::string err = MealRecordStorage::getLastError();
+        check(!err.empty(), "损坏行必须设置 lastError");
+        check(err.find("InvalidData") != std::string::npos,
+              "lastError 应含 InvalidData，实际: [" + err + "]");
     }
     removeFileIfExists(kTestPath);
 
@@ -310,8 +317,84 @@ int main()
         // 恢复测试路径
         MealRecordStorage::setFilePath(kTestPath);
     }
+    removeFileIfExists(kTestPath);
 
-    // 最终清理
+    // ---- Case 12: V2 格式下菜名含管道符、反斜杠均完整 round-trip ----
+    {
+        std::cout << "[Case 12] V2 特殊字符完整 round-trip" << std::endl;
+        MealRecordStorage::clearLastError();
+
+        MealRecord mr;
+        mr.recipeId = 42;
+        mr.recipeName = "番茄|鸡蛋\\土豆";  // 含管道符和反斜杠
+        mr.servings = 1;
+        mr.time = "2026-10-28 12:00:00";
+        mr.date = "2026-10-28";
+        mr.nutrition = NutritionInfo{256.0, 21.75, 12.2, 13.6};
+
+        // 手动 append（通过 V2 格式写入）
+        bool ok = MealRecordStorage::append(mr);
+        check(ok, "含特殊字符的 append 成功");
+        check(MealRecordStorage::getLastError().empty(), "写入无错误");
+
+        const auto all = MealRecordStorage::loadAll();
+        check(all.size() == 1, "应读取到 1 条记录");
+        if (!all.empty()) {
+            check(all.front().recipeName == "番茄|鸡蛋\\土豆",
+                  "recipeName 特殊字符完整保留，实际: [" + all.front().recipeName + "]");
+            check(all.front().date == "2026-10-28", "独立 date 字段保留");
+        }
+    }
+    removeFileIfExists(kTestPath);
+
+    // ---- Case 13: V1 损坏文件升级被严格拒绝，原文件逐字节不变 ----
+    // 修复 issue 2：V1→V2 升级前必须完整验证，损坏直接拒绝，原文件不动。
+    {
+        std::cout << "[Case 13] V1 损坏文件升级被拒绝，原文件不变" << std::endl;
+        MealRecordStorage::clearLastError();
+
+        // 手动写一个 V1 损坏文件
+        {
+            std::ofstream out(kTestPath, std::ios::binary);
+            out << "1|番茄炒蛋|1|2026-10-20 08:00:00|200|10|20|30\n";  // 正常
+            out << "abc|def|ghi\n";                                 // 损坏（字段不够）
+            out << "2|宫保鸡丁|2|2026-10-20 19:00:00|400|20|40|60\n"; // 正常
+        }
+        // 保存原文件字节
+        std::error_code ec;
+        const fs::path p = fs::u8path(kTestPath);
+        const fs::path bak = fs::u8path("_bak_v1_before_upgrade.txt");
+        fs::copy(p, bak, fs::copy_options::overwrite_existing, ec);
+
+        // 尝试追加：严格读 V1 → 遇到损坏行 → 拒绝升级 → append 返回 false
+        MealRecord newRec;
+        newRec.recipeId = 3; newRec.recipeName = "新增";
+        newRec.servings = 1; newRec.time = "2026-10-21 08:00:00";
+        newRec.nutrition = NutritionInfo{100, 10, 20, 30};
+        bool ok = MealRecordStorage::append(newRec);
+        check(!ok, "V1 损坏文件 append 必须失败");
+        const std::string err = MealRecordStorage::getLastError();
+        check(!err.empty() && err.find("InvalidData") != std::string::npos,
+              "错误应含 InvalidData，实际: [" + err + "]");
+
+        // 原文件仍存在（真实检查，不再恒真）
+        check(fs::exists(p, ec), "原文件仍存在");
+        // 原文件逐字节对比 — 不变
+        std::ifstream ifs1(p, std::ios::binary | std::ios::ate);
+        std::ifstream ifs2(bak, std::ios::binary | std::ios::ate);
+        if (ifs1 && ifs2) {
+            std::streamsize s1 = ifs1.tellg();
+            std::streamsize s2 = ifs2.tellg();
+            ifs1.seekg(0); ifs2.seekg(0);
+            std::string buf1(s1, '\0'); std::string buf2(s2, '\0');
+            ifs1.read(buf1.data(), s1); ifs2.read(buf2.data(), s2);
+            check(buf1 == buf2, "损坏 V1 文件升级被拒绝后原文件逐字节不变");
+        }
+        // Windows 下必须先关闭流才能删除文件，否则备份文件会残留在工作目录
+        ifs1.close();
+        ifs2.close();
+        fs::remove(bak, ec);
+    }
     removeFileIfExists(kTestPath);
     MealRecordStorage::clearLastError();
 

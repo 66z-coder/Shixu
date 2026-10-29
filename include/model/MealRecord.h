@@ -20,4 +20,8 @@ struct MealRecord
     std::string date;
     // 本次用餐对应的总营养（复用 NutritionInfo）。
     NutritionInfo nutrition;
+    // 事件 ID：由 recordMealOnce(EventId) 写入并持久化，
+    // 用于重启后的幂等去重。旧 recordMeal() 自由函数不设置此值，
+    // 这些记录不参与新接口的事件去重。
+    std::string eventId = {};
 };
