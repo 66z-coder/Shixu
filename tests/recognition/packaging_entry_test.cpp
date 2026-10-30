@@ -1,5 +1,8 @@
 #include "recognition/PackagingEntryWidget.h"
 #include <QApplication>
+#include <QDialog>
+#include <QImage>
+#include <QTemporaryDir>
 #include <QLineEdit>
 #include <QComboBox>
 #include <QCheckBox>
@@ -32,7 +35,7 @@ int main(int argc,char** argv){
  auto* remove=w.findChild<QPushButton*>("deleteFood");
  auto* list=w.findChild<QListWidget*>("pendingFoods");
  auto* quantity=w.findChild<QDoubleSpinBox*>("foodQuantity");
- auto parse=[&]{for(auto* b:w.findChildren<QPushButton*>())if(b->text()=="解析日期信息")b->click();};
+ auto parse=[&]{for(auto* b:w.findChildren<QPushButton*>())if(b->text()=="解析日期信息")b->click(); w.findChild<QPushButton*>("applyRecognizedDates")->click();};
  check(!w.findChild<QComboBox*>("countingConvention"),"counting option removed");
  int submissions=0;std::vector<FoodCandidate> received;
  QObject::connect(&w,&PackagingEntryWidget::foodsConfirmed,[&](const std::vector<FoodCandidate>& f){++submissions;received=f;w.completeSubmission(true);});
@@ -89,13 +92,13 @@ int main(int argc,char** argv){
  auto* total=w.findChild<QLabel*>("totalWeight");
  name->setText("西红柿");unit->setCurrentText("个");quantity->setValue(10);mode->setCurrentIndex(3);
  check(!weight->isHidden() && total->text().contains("未知"),"count unit offers optional weight");
- weight->setValue(150);check(total->text()=="1500.0 g","ten items at 150g");
+ weight->setValue(150);check(total->text().contains("= 1500 g"),"ten items at 150g");
  confirmed->setChecked(true);quantity->setValue(2);
- check(!confirmed->isChecked() && total->text()=="300.0 g","quantity recalculates and resets confirmation");
+ check(!confirmed->isChecked() && total->text().contains("= 300 g"),"quantity recalculates and resets confirmation");
  quantity->setValue(10);confirmed->setChecked(true);save->click();
- check(weight->value()==0 && list->item(0)->text().contains("1500.0 g"),"clear form retains queued weight");
+ check(weight->value()==0 && list->item(0)->text().contains("1500 g"),"clear form retains queued weight");
  list->setCurrentRow(0);edit->click();
- check(weight->value()==150 && total->text()=="1500.0 g","edit restores weight");
+ check(weight->value()==150 && total->text().contains("= 1500 g"),"edit restores weight");
  weight->setValue(120);confirmed->setChecked(true);save->click();submit->click();
  check(received[0].quantity==10 && received[0].unit=="个" && received[0].gramsPerUnit==120
        && received[0].totalWeightGrams==1200,"batch carries original units and weights");
@@ -145,6 +148,35 @@ int main(int argc,char** argv){
  check(weight->value()==0 && weightEditor->text().isEmpty() && total->text().contains("未知"),
        "delete weight removes prior total");
  key(weightEditor,Qt::Key_2,"2");check(weight->value()==2,"retype optional weight");
+ // Date recognition is a staged dialog: imports, edits, failures and cancel never touch the draft.
+ reset->click(); w.show(); QApplication::processEvents();
+ name->setText("牛奶"); category->setCurrentText("其他"); unit->setCurrentText("盒"); quantity->setValue(2);
+ auto* netUnit=w.findChild<QComboBox*>("netContentUnit"); netUnit->setCurrentText("ml"); weight->setValue(250);
+ mode->setCurrentIndex(1); expiry->setText("2027-01-01"); confirmed->setChecked(true);
+ check(total->text()=="2 盒 × 250 ml = 500 ml", "volume preview preserves package count");
+ auto* dialog=w.findChild<QDialog*>("packagingDateDialog");
+ auto* open=w.findChild<QPushButton*>("openDateRecognition");
+ auto* apply=w.findChild<QPushButton*>("applyRecognizedDates");
+ check(dialog && !dialog->isVisible(), "recognition starts outside main form");
+ open->click(); QApplication::processEvents(); check(dialog->isVisible(), "date button opens dialog");
+ QTemporaryDir images; QImage photo(20,20,QImage::Format_RGB32); photo.fill(Qt::white);
+ auto path=images.filePath("package.png"); check(photo.save(path) && w.loadImageFile(path), "import date photo");
+ raw->setPlainText("有效期至 2028-02-03");
+ for(auto* b:w.findChildren<QPushButton*>())if(b->text()=="解析日期信息")b->click();
+ check(expiry->text()=="2027-01-01" && confirmed->isChecked(), "recognition waits for explicit apply");
+ dialog->reject(); check(expiry->text()=="2027-01-01" && confirmed->isChecked(), "cancel preserves existing date and confirmation");
+ open->click(); raw->setPlainText("有效期至 2028-02-03 有效期至 2029-02-03");
+ for(auto* b:w.findChildren<QPushButton*>())if(b->text()=="解析日期信息")b->click();
+ check(!apply->isEnabled() && expiry->text()=="2027-01-01", "ambiguous recognition cannot overwrite manual date");
+ raw->setPlainText("有效期至 2028-02-03"); parse();
+ check(expiry->text()=="2028-02-03" && !confirmed->isChecked() && !dialog->isVisible(), "apply fills date and requires final confirmation");
+ check(name->text()=="牛奶" && category->currentText()=="其他" && quantity->value()==2 && unit->currentText()=="盒"
+       && weight->value()==250 && netUnit->currentText()=="ml", "OCR leaves all basic information unchanged");
+ confirmed->setChecked(true); w.findChild<QPushButton*>("saveToInventory")->click();
+ check(received.size()==1 && received[0].netContentPerUnit==250 && received[0].netContentUnit=="ml"
+       && received[0].quantity==2 && received[0].gramsPerUnit==0 && received[0].totalWeightGrams==0,
+       "direct save carries volume without inventing mass");
+ check(name->text().isEmpty() && list->count()==0, "successful direct save clears only draft");
  std::cout<<"PASS: batch add/edit/delete/cancel/submit, date calculation, incomplete input and unknown expiry\n";return 0;
  }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}
 }

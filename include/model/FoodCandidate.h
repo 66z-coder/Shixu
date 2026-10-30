@@ -14,6 +14,8 @@ struct FoodCandidate
     double totalWeightGrams = 0.0; // 总净重(g)；0 表示未知，不能当作无库存
     qint64 batchId = 0; // 库存批次标识；录入时为 0
     QString category; // 空值表示尚未分类
+    double netContentPerUnit = 0.0; // 单件净含量；0 表示未知，旧数据可回退到 gramsPerUnit
+    QString netContentUnit = "g"; // g/kg/ml/L；体积不可直接作为营养计算克重
     // g/kg/斤按单位计算总重；计数单位=quantity*gramsPerUnit；ml/L不假设密度。
 
 };

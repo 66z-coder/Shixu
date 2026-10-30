@@ -4,6 +4,8 @@
 #include "model/FoodCandidate.h"
 #include "recognition/ReceiptOcrService.h"
 #include "recognition/RecognitionService.h"
+#include "model/DateRecognitionResult.h"
+class QDialog;
 class QLineEdit;
 class QComboBox;
 class QSpinBox;
@@ -30,15 +32,23 @@ private:
     bool eventFilter(QObject* watched, QEvent* event) override;
     void chooseImage();
     void parseText();
+    void openDateRecognition();
+    void applyRecognizedDates();
     void refresh();
     void clearForm();
     void editSelected();
     QString validate(FoodCandidate& candidate) const;
     QLineEdit *name_, *production_, *expiry_;
     QDoubleSpinBox *quantity_, *unitWeight_;
-    QComboBox *unit_, *mode_, *periodUnit_, *category_;
+    QComboBox *unit_, *mode_, *periodUnit_, *category_, *netContentUnit_;
     QFormLayout *form_;
-    QWidget *expiryRow_, *productionRow_;
+    QWidget *expiryRow_, *productionRow_, *netContentRow_;
+    QDialog* recognitionDialog_;
+    QLabel *recognitionStatus_, *recognitionSummary_;
+    QPushButton *openRecognition_, *applyDates_, *directSave_;
+    DateRecognitionResult recognizedDates_;
+    bool recognitionActive_ = false;
+    bool directSubmission_ = false;
     bool categoryManual_ = false;
     QSpinBox *period_, *storageDays_;
     QPlainTextEdit* raw_;

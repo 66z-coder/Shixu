@@ -112,6 +112,19 @@ int main(int argc,char** argv) {
             check(w.isEnabled() && list->count()==1 && submit->isEnabled(),"failed save can retry");
             submit->click();w.completeSubmission(true);submit->click();
             check(requests==2 && list->count()==0,"successful acknowledgement clears exactly once");
+            w.findChild<QLineEdit*>("foodName")->setText("牛奶");
+            w.findChild<QComboBox*>("foodUnit")->setCurrentText("盒");
+            w.findChild<QComboBox*>("netContentUnit")->setCurrentText("ml");
+            w.findChild<QDoubleSpinBox*>("gramsPerUnit")->setValue(250);
+            w.findChild<QComboBox*>("dateMode")->setCurrentIndex(3);
+            w.findChild<QCheckBox*>("confirmed")->setChecked(true);
+            auto* direct=w.findChild<QPushButton*>("saveToInventory");
+            direct->click(); direct->click();
+            check(requests==3 && !w.isEnabled(), "direct save prevents duplicate submission");
+            w.completeSubmission(false);
+            check(w.findChild<QLineEdit*>("foodName")->text()=="牛奶" && direct->isEnabled(), "failed direct save keeps editable draft");
+            direct->click(); w.completeSubmission(true);
+            check(requests==4 && w.findChild<QLineEdit*>("foodName")->text().isEmpty(), "direct save retry clears after acknowledgement");
         }
         {
             MainWindow window;
@@ -149,6 +162,29 @@ int main(int argc,char** argv) {
         {
             InventoryManager inventory;
             check(inventory.getAllItems().size()==10,"UI records persist on reopen without duplicate retry");
+            auto milk=food("体积牛奶",2,"盒",999); milk.netContentPerUnit=250; milk.netContentUnit="ml";
+            milk.expiryDate=QDate::currentDate();
+            QString error; check(inventory.addFoods({milk}, &error), "volume net content saved");
+            auto saved=inventory.getAllItems().last();
+            check(saved.quantity==2 && saved.unit=="盒" && saved.netContentPerUnit==250 && saved.netContentUnit=="ml"
+                  && saved.gramsPerUnit==0 && saved.totalWeightGrams==0, "volume never becomes gram weight");
+            saved.quantity=3; check(inventory.updateFood(saved,&error), "edit quantity retains package content");
+            check(inventory.getExpiringItems(QDate::currentDate(),3).last().netContentPerUnit==250,
+                  "expiring query preserves content fields");
+            auto kg=food("净含量千克",2,"袋"); kg.netContentPerUnit=0.5; kg.netContentUnit="kg";
+            check(inventory.addFoods({kg},&error) && inventory.getAllItems().last().totalWeightGrams==1000,
+                  "mass net content converts for nutrition contracts");
+            auto invalid=milk; invalid.netContentUnit="invalid";
+            check(!inventory.addFoods({invalid},&error), "unsupported content unit rejected");
+        }
+        {
+            InventoryManager inventory;
+            const auto items=inventory.getAllItems(); const auto milk=items[items.size()-2];
+            check(milk.quantity==3 && milk.netContentPerUnit==250 && milk.netContentUnit=="ml" && milk.totalWeightGrams==0,
+                  "volume survives database restart and quantity edit");
+            InventoryWidget view; view.setItems({milk});
+            check(view.findChild<QTableWidget*>("inventoryTable")->item(0,2)->text().contains("750 ml"),
+                  "inventory shows calculated total volume");
         }
         QDir::setCurrent(original);
         std::cout<<"PASS: migration, atomic save, weight roundtrip, pending/retry, real page integration"<<std::endl;

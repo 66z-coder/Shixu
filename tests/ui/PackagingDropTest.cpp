@@ -42,6 +42,7 @@ int main(int argc, char **argv) {
         check(image.save(path), "write image");
         PackagingEntryWidget entry;
         entry.show();
+        entry.findChild<QPushButton*>("openDateRecognition")->click();
         QApplication::processEvents();
         auto *area = entry.findChild<QWidget *>("packageDropArea");
         auto *preview = entry.findChild<QLabel *>("packagePreview");

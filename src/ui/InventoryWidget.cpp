@@ -40,6 +40,8 @@ QString displayQuantity(const FoodCandidate &food) {
         QStringLiteral("把"), QStringLiteral("份")}.contains(unit);
     const QString raw = QStringLiteral("%1 %2").arg(displayNumber(food.quantity), food.unit);
     if (!counted) return raw;
+    if (food.netContentPerUnit > 0 && (food.netContentUnit == "ml" || food.netContentUnit == "L"))
+        return QStringLiteral("%1 · 共 %2 %3").arg(raw, displayNumber(food.quantity * food.netContentPerUnit), food.netContentUnit);
     if (!std::isfinite(food.gramsPerUnit) || food.gramsPerUnit <= 0)
         return raw + QStringLiteral(" · 重量未知");
     const double whole = std::floor(food.quantity);
@@ -185,18 +187,21 @@ void InventoryWidget::editItem(int row) {
     quantity->setDecimals(4); quantity->setRange(0.0001, 1000000000); quantity->setValue(food.quantity);
     auto *unit = new QLineEdit(food.unit, &dialog); unit->setObjectName("inventoryEditUnit");
     auto *weight = new QDoubleSpinBox(&dialog); weight->setObjectName("inventoryEditWeight");
-    weight->setDecimals(4); weight->setRange(0, 1000000000); weight->setValue(food.gramsPerUnit);
+    weight->setDecimals(4); weight->setRange(0, 1000000000); weight->setValue(food.netContentPerUnit > 0 ? food.netContentPerUnit : food.gramsPerUnit);
     const double displayedQuantity = quantity->value();
     const double displayedWeight = weight->value();
-    weight->setSpecialValueText(QStringLiteral("未知")); weight->setSuffix(QStringLiteral(" 克"));
+    weight->setSpecialValueText(QStringLiteral("未知"));
+    auto* contentUnit = new QComboBox(&dialog); contentUnit->setObjectName("inventoryNetContentUnit");
+    contentUnit->addItems({"g", "kg", "ml", "L"}); contentUnit->setCurrentText(food.netContentUnit);
+    auto* contentRow = new QHBoxLayout; contentRow->addWidget(weight, 3); contentRow->addWidget(contentUnit, 1);
     auto *hasDate = new QCheckBox(QStringLiteral("设置到期日期"), &dialog); hasDate->setChecked(food.expiryDate.isValid());
     auto *date = new QDateEdit(food.expiryDate.isValid() ? food.expiryDate : Shixu::appNow().date(), &dialog);
     date->setCalendarPopup(true); date->setDisplayFormat("yyyy-MM-dd"); date->setEnabled(hasDate->isChecked());
     connect(hasDate, &QCheckBox::toggled, date, &QWidget::setEnabled);
     form->addRow(QStringLiteral("名称"), name); form->addRow(QStringLiteral("分类"), category);
     form->addRow(QStringLiteral("数量"), quantity); form->addRow(QStringLiteral("单位"), unit);
-    form->addRow(QStringLiteral("单件净重（计数单位）"), weight); form->addRow(hasDate, date); outer->addLayout(form);
-    auto *hint = new QLabel(QStringLiteral("计数单位可填写单件净重；选择“未知”时不会估算重量。重量单位按数量自动计算。"), &dialog);
+    form->addRow(QStringLiteral("单件净含量（计数单位）"), contentRow); form->addRow(hasDate, date); outer->addLayout(form);
+    auto *hint = new QLabel(QStringLiteral("计数单位可填写单件净含量；体积按 ml/L 保存，不直接换算克重。重量单位按数量自动计算。"), &dialog);
     hint->setObjectName("inventoryEditHint"); hint->setWordWrap(true); outer->addWidget(hint);
     auto *errorLabel = new QLabel(&dialog); errorLabel->setObjectName("inventoryEditError");
     errorLabel->setWordWrap(true); errorLabel->hide(); outer->addWidget(errorLabel);
@@ -211,7 +216,11 @@ void InventoryWidget::editItem(int row) {
         updated.name = name->text(); updated.category = category->currentText();
         if (quantity->value() != displayedQuantity) updated.quantity = quantity->value();
         updated.unit = unit->text();
-        if (weight->value() != displayedWeight) updated.gramsPerUnit = weight->value();
+        if (weight->value() != displayedWeight || contentUnit->currentText() != food.netContentUnit) {
+            updated.netContentPerUnit = weight->value(); updated.netContentUnit = contentUnit->currentText();
+            updated.gramsPerUnit = updated.netContentUnit == "g" ? weight->value()
+                : updated.netContentUnit == "kg" ? weight->value() * 1000 : 0;
+        }
         updated.expiryDate = hasDate->isChecked() ? date->date() : QDate();
         QString error;
         if (m_update(updated, &error)) dialog.accept();
