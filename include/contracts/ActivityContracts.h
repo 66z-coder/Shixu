@@ -12,6 +12,8 @@ struct CookingActivitySnapshot {
     int expiringCookingCount = 0;
     int currentCookingStreak = 0;
     int bestCookingStreak = 0;
+    int todayMealCount = 0; // Completed and legacy meal records on the reference date.
+    NutritionInfo todayNutrition;
     std::vector<MealRecord> recentMeals; // Latest ten verified Completed events, descending.
     std::vector<MealRecord> legacyMeals; // No event ID; display only, not eligible for achievements.
     std::vector<CookingAchievement> achievements;

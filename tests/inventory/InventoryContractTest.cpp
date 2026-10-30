@@ -483,6 +483,30 @@ if (preview.outcome.status == OperationStatus::Succeeded) {
         }
     }
 
+    {
+        InventoryManager inventory;
+        FoodCandidate oil; oil.name = QStringLiteral("食用油"); oil.quantity = 5; oil.unit = QStringLiteral("g");
+        FoodCandidate unknownOil; unknownOil.name = QStringLiteral("食用油"); unknownOil.quantity = 1; unknownOil.unit = QStringLiteral("瓶");
+        check(inventory.addFoods({oil, unknownOil}), "pantry test stock saved");
+        auto service = createInventoryService(inventory);
+        ConsumptionRequest request;
+        request.eventId = "123e4567-e89b-42d3-a456-426614174099";
+        request.completedAt = "2026-10-28 12:00:00";
+        request.requirements = {{"食用油", 10}};
+        request.externallyPreparedFoods = {"食用油"};
+        auto preview = service->previewConsumption(request);
+        check(preview.outcome.status == OperationStatus::Succeeded && preview.planned.size() == 1 &&
+              approximatelyEqual(preview.planned[0].consumedGrams, 5), "known oil deducted, remainder externally prepared");
+        auto result = service->consumeForCooking(request, preview.previewToken);
+        check(result.outcome.status == OperationStatus::Succeeded && result.consumed.size() == 1 &&
+              approximatelyEqual(result.consumed[0].consumedGrams, 5), "known oil consumption committed once");
+        auto snapshot = service->getInventoryBatches();
+        bool unknownPreserved = false;
+        for (const auto &batch : snapshot.value.batches)
+            if (batch.name == "食用油" && batch.unit == "瓶" && batch.quantity == 1 && batch.totalWeightGrams == 0)
+                unknownPreserved = true;
+        check(unknownPreserved, "unknown-weight oil is not guessed or deducted");
+    }
     QDir::setCurrent(originalPath);
 
     qInfo() << "Test failures:" << failures;

@@ -13,6 +13,7 @@ class QCheckBox;
 class QLabel;
 class QPushButton;
 class QListWidget;
+class QFormLayout;
 
 class PackagingEntryWidget : public QWidget
 {
@@ -35,7 +36,10 @@ private:
     QString validate(FoodCandidate& candidate) const;
     QLineEdit *name_, *production_, *expiry_;
     QDoubleSpinBox *quantity_, *unitWeight_;
-    QComboBox *unit_, *mode_, *periodUnit_;
+    QComboBox *unit_, *mode_, *periodUnit_, *category_;
+    QFormLayout *form_;
+    QWidget *expiryRow_, *productionRow_;
+    bool categoryManual_ = false;
     QSpinBox *period_, *storageDays_;
     QPlainTextEdit* raw_;
     QCheckBox* confirmed_;

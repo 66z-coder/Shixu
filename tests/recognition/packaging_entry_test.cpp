@@ -21,6 +21,8 @@ int main(int argc,char** argv){
  auto* unit=w.findChild<QComboBox*>("foodUnit");
  auto* mode=w.findChild<QComboBox*>("dateMode");
  auto* expiry=w.findChild<QLineEdit*>("expiryDate");
+ auto* production=w.findChild<QLineEdit*>("productionDate");
+ auto* category=w.findChild<QComboBox*>("foodCategory");
  auto* raw=w.findChild<QPlainTextEdit*>("packageText");
  auto* confirmed=w.findChild<QCheckBox*>("confirmed");
  auto* save=w.findChild<QPushButton*>("saveFood");
@@ -35,6 +37,8 @@ int main(int argc,char** argv){
  int submissions=0;std::vector<FoodCandidate> received;
  QObject::connect(&w,&PackagingEntryWidget::foodsConfirmed,[&](const std::vector<FoodCandidate>& f){++submissions;received=f;w.completeSubmission(true);});
  name->setText("西红柿");unit->setCurrentText("公斤");
+ check(category->currentText()==QStringLiteral("蔬菜"),"automatic category suggestion");
+ category->setCurrentText(QStringLiteral("其他"));
  raw->setPlainText("有效期至：2027-01-01");parse();
  check(!save->isEnabled(),"confirmation required");
  confirmed->setChecked(true);save->click();
@@ -55,12 +59,18 @@ int main(int argc,char** argv){
  list->setCurrentRow(2);remove->click();check(list->count()==2,"delete chosen item");
  submit->click();
  check(submissions==1 && received.size()==2 && received[0].name=="番茄" && received[0].quantity==2.5
+ && received[0].category==QStringLiteral("其他")
  && received[0].unit=="kg" && received[1].expiryDate==QDate(2026,11,19),"one batch standardized output");
  check(list->count()==0 && !submit->isEnabled(),"batch clears and cannot resubmit");
  raw->setPlainText("有效期至 2027-01-01 有效期至 2027-02-01");parse();
  check(mode->currentIndex()==0 && expiry->text().isEmpty(),"conflicting dates still require supplement");
  reset->click();name->setText("苹果");unit->setCurrentText("一些");mode->setCurrentIndex(3);confirmed->setChecked(true);
  check(!save->isEnabled(),"unknown unit blocked");
+ reset->click();
+ name->setText("青菜"); unit->setCurrentText("个"); mode->setCurrentIndex(1);
+ check(category->currentText()==QStringLiteral("蔬菜") && expiry->isReadOnly() && production->parentWidget()->isHidden(),"known expiry only and category");
+ confirmed->setChecked(true); check(!save->isEnabled(),"date requires explicit choice");
+ expiry->setText("2027-01-01"); confirmed->setChecked(true); check(save->isEnabled(),"explicit expiry needs no production");
  reset->click();
  check(quantity->decimals()==1 && quantity->minimum()==0.1,"one decimal quantity");
  name->setText("西红柿");unit->setCurrentText("个");quantity->setValue(10);mode->setCurrentIndex(4);

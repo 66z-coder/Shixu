@@ -1,5 +1,7 @@
 #include "RecipeData.h"
 
+#include <algorithm>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -83,6 +85,23 @@ Recipe dish(int id, const char* name, const char* category, int minutes,
     recipe.ingredients = std::move(ingredients);
     recipe.steps = std::move(steps);
     recipe.tags = std::move(tags);
+    // Apply conservative, transparent thresholds to the optional nutrition tags.
+    // Values are based on the recipe's raw ingredient weights and estimates.
+    static const std::set<std::string> vegetables = {
+        "番茄", "青椒", "黄瓜", "胡萝卜", "西兰花", "小白菜", "洋葱", "青豆",
+        "油菜", "冬瓜", "韭菜", "芹菜", "油麦菜", "茄子", "豆角", "菠菜", "西葫芦"};
+    double weight = 0, protein = 0, vegetableWeight = 0;
+    for (const auto &ingredient : recipe.ingredients) {
+        weight += ingredient.amountGrams;
+        protein += ingredient.amountGrams * ingredient.nutritionPer100g.protein / 100.0;
+        if (vegetables.count(ingredient.foodName)) vegetableWeight += ingredient.amountGrams;
+    }
+    auto removeTag = [&](const char *tag) {
+        recipe.tags.erase(std::remove(recipe.tags.begin(), recipe.tags.end(), tag), recipe.tags.end());
+    };
+    if (weight <= 0 || protein / weight < 0.10) removeTag("high_protein");
+    if (weight <= 0 || vegetableWeight < 200 || vegetableWeight / weight < 0.5)
+        removeTag("vegetable_rich");
     return recipe;
 }
 
@@ -233,7 +252,7 @@ std::vector<Recipe> loadBuiltinRecipes()
              {"番茄切块煮出味。",
               "淋入蛋液成蛋花。",
               "调味即可出锅。"},
-             {"quick", "easy", "light", "vegetable_rich", "appetizing"}),
+             {"quick", "easy", "light", "vegetable_rich"}),
 
         dish(21, "黄瓜炒鸡蛋", "荤素", 15,
              {ing("黄瓜", 250), ing("鸡蛋", 150), ing("食用油", 15)},

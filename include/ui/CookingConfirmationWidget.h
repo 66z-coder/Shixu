@@ -4,6 +4,7 @@
 class QLabel;
 class QPushButton;
 class QVBoxLayout;
+class QFrame;
 class CookingConfirmationWidget : public QWidget {
     Q_OBJECT
 public:
@@ -17,15 +18,21 @@ signals:
                              const QString& confirmationToken);
     void retryRequested(const QString& eventId);
     void cancelPreparedRequested(const QString& eventId);
+    void closeRequested();
 private:
     Shixu::Contracts::V1::CookingCompletionRequest m_request;
     QString m_token;
     bool m_busy = false;
     bool m_allowChoices = false;
+    QString m_recipeName;
+    double m_calories = 0;
     QLabel* m_title = nullptr;
     QLabel* m_status = nullptr;
+    QLabel* m_missingHeading = nullptr;
+    QFrame* m_missingCard = nullptr;
     QVBoxLayout* m_missing = nullptr;
     QPushButton* m_confirm = nullptr;
     QPushButton* m_retry = nullptr;
     QPushButton* m_cancelPrepared = nullptr;
+    QPushButton* m_close = nullptr;
 };

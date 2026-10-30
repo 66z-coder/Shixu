@@ -1,4 +1,5 @@
 #include "contracts/RecommendationContract.h"
+#include "recipe/RecipeService.h"
 #include <QCoreApplication>
 #include <QFile>
 #include <algorithm>
@@ -207,7 +208,7 @@ void policiesAndUnknown() {
     check(reason.contains(QStringLiteral("重量未确认")) && !reason.contains(QStringLiteral("均能确认充足")),
           "Honest unknown reason");
     c.preferences->inventoryPolicy = V::InventoryPolicy::SmallPurchase;
-    check(s->recommend(c).cards.empty(), "Unknown not certain purchase");
+    check(s->recommend(c).cards.size() == 1, "Legacy purchase policy allows unknown stock");
     c.preferences->inventoryPolicy = V::InventoryPolicy::OnlyInventory;
     check(s->recommend(c).cards.empty(), "Strict rejects unknown");
     b.answers = {{"番茄", 100, 100, 0, true, true, V::AvailabilityState::Enough}};
@@ -219,8 +220,21 @@ void policiesAndUnknown() {
     auto two = s->recommend(c);
     check(two.cards.size() == 1 && two.cards[0].availability.size() == 2,
           "Two shortages allowed including oil");
+    b.answers = {{"番茄", 100, 100, 0, false, false, V::AvailabilityState::Enough}};
+    c.preferences->inventoryPolicy = V::InventoryPolicy::OnlyInventory;
+    auto strict = s->recommend(c);
+    check(strict.cards.size() == 1 && strict.cards[0].ingredientMatchScore == 100 &&
+          !strict.cards[0].reasons.join(";").contains(QStringLiteral("食用油还需")),
+          "Oil shortage does not affect strict policy or score");
+    b.answers.push_back({"食用油", 10, 0, 10, true, false, V::AvailabilityState::Unknown});
+    check(s->recommend(c).cards.size() == 1, "Unknown oil does not block strict policy");
+    b.answers.clear();
+    c.preferences->inventoryPolicy = V::InventoryPolicy::SmallPurchase;
     r.data[0].ingredients.push_back({"鸡蛋", 100, {}});
-    check(s->recommend(c).cards.empty(), "Three shortages excluded");
+    check(s->recommend(c).cards.size() == 1, "Oil does not count toward shortage limit");
+    r.data[0].ingredients.push_back({"大蒜", 10, {}});
+    check(s->recommend(c).cards.size() == 1, "Legacy purchase policy has no shortage limit");
+    r.data[0].ingredients.pop_back();
     c.preferences->inventoryPolicy = V::InventoryPolicy::PreferInventory;
     c.inventorySnapshot.batches.clear();
     check(s->recommend(c).cards.size() == 1, "Empty inventory still gets C full recipes");
@@ -232,6 +246,14 @@ void policiesAndUnknown() {
     auto tomato = std::find_if(req.requirements.begin(), req.requirements.end(),
                                [](const auto &x) { return x.foodName == "番茄"; });
     check(tomato != req.requirements.end() && tomato->requiredGrams == 125, "Duplicate ingredient summed");
+    r.data = {recipe(2)};
+    r.data[0].ingredients = {{"食用油", 10, {}}};
+    c.preferences->inventoryPolicy = V::InventoryPolicy::OnlyInventory;
+    auto pantryOnly = s->recommend(c);
+    check(pantryOnly.cards.size() == 1 && pantryOnly.cards[0].ingredientMatchScore == 100,
+          "Pantry-only recipe has full match without division by zero");
+    c.excludedIngredients = {QStringLiteral("食用油")};
+    check(s->recommend(c).cards.empty(), "Explicit avoidance still applies to oil");
 }
 void batchesAndRefinements() {
     Recipes r;
@@ -316,6 +338,56 @@ void moodsAndRoles() {
     auto out = s->recommend(context());
     check(out.cards[0].recipeId == 1 && out.cards[1].recipeId == 2 && out.cards[2].recipeId == 4,
           "Cards not simple top three scores");
+}
+void prioritiesAndRepetition() {
+    Recipes r;
+    Stock b;
+    b.answers = {{"番茄", 100, 100, 0, false, false, V::AvailabilityState::Enough}};
+    r.data = {recipe(1, 10, {V::Tags::Light}, "番茄"),
+              recipe(2, 25, {V::Tags::Hearty, V::Tags::Special}, "牛肉"),
+              recipe(3, 46, {V::Tags::Hearty, V::Tags::Special}, "牛肉")};
+    auto service = V::createRecommendationService(r, b);
+    auto c = context(V::Mood::TreatMyself, 45);
+    auto treat = service->recommend(c);
+    check(treat.cards[0].recipeId == 2, "Mood can outweigh stock and short cooking time");
+    check(std::none_of(treat.cards.begin(), treat.cards.end(), [](const auto &v) { return v.recipeId == 3; }),
+          "Time cap remains a hard constraint");
+    c.preferences->inventoryPolicy = V::InventoryPolicy::OnlyInventory;
+    check(service->recommend(c).cards[0].recipeId == 1, "Only-inventory policy remains strict");
+    c.preferences->inventoryPolicy = V::InventoryPolicy::PreferInventory;
+    r.data = {recipe(1, 10), recipe(2, 20)};
+    b.enoughByDefault = true;
+    c = context(V::Mood::Tired, 30);
+    check(service->recommend(c).cards[0].recipeId == 1, "Tired mood prefers faster dishes");
+    c = context(V::Mood::TreatMyself, 30);
+    auto baseline = service->recommend(c);
+    check(baseline.cards[0].recipeId == 1, "Equal qualifying times do not reward speed outside tired mood");
+    check(std::abs(baseline.cards[0].totalScore - baseline.cards[1].totalScore) < 1e-8,
+          "Within the cap, non-tired time scores are equal");
+    c.recentRecipeIds = {1, 1, 2};
+    auto repeated = service->recommend(c);
+    check(repeated.cards[0].recipeId == 2, "Repeated meal gets a small penalty");
+    auto it = std::find_if(repeated.cards.begin(), repeated.cards.end(), [](const auto &v) { return v.recipeId == 1; });
+    check(it != repeated.cards.end() && std::abs(it->totalScore - (baseline.cards[0].totalScore - 6)) < 1e-8 &&
+          it->reasons.join(";").contains(QStringLiteral("连续做过 2 次")), "Repetition penalty is bounded and explained");
+    r.data = {recipe(1, 10)};
+    check(service->recommend(c).cards.size() == 1, "Repetition never excludes the only dish");
+}
+void builtinTagAudit() {
+    const auto recipes = findRecipesByFoods({{"", "番茄", 300}});
+    auto soup = std::find_if(recipes.begin(), recipes.end(), [](const auto &r) { return r.name == "番茄蛋花汤"; });
+    check(soup != recipes.end(), "Tomato egg soup exists");
+    check(std::find(soup->tags.begin(), soup->tags.end(), V::Tags::Appetizing) == soup->tags.end(),
+          "Tomato egg soup does not get an unsupported appetite tag");
+    for (const auto &r : recipes) {
+        if (std::find(r.tags.begin(), r.tags.end(), V::Tags::HighProtein) == r.tags.end()) continue;
+        double grams = 0, protein = 0;
+        for (const auto &i : r.ingredients) {
+            grams += i.amountGrams;
+            protein += i.amountGrams * i.nutritionPer100g.protein / 100.0;
+        }
+        check(grams > 0 && protein / grams >= 0.10, "Protein tag respects the estimated threshold");
+    }
 }
 void isolationAndFailures() {
     Recipes r;
@@ -482,6 +554,8 @@ int main(int argc, char **argv) {
         policiesAndUnknown();
         batchesAndRefinements();
         moodsAndRoles();
+        prioritiesAndRepetition();
+        builtinTagAudit();
         isolationAndFailures();
         honestReasons();
         if (app.arguments().contains(QStringLiteral("--show-output"))) {

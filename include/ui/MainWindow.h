@@ -11,6 +11,7 @@ class QWidget;
 class QFrame;
 class HomeWidget;
 class InventoryWidget;
+class RecipeDetailsWidget;
 class InventoryManager;
 struct FoodCandidate;
 
@@ -36,11 +37,15 @@ class MainWindow : public QMainWindow {
     void showPage(Page page);
     void addFood(const FoodCandidate &candidate);
 
+  protected:
+    void resizeEvent(QResizeEvent *event) override;
+
   private:
     struct Services;
     std::unique_ptr<Services> m_services;
     void initializeV1(class RewardSystem *rewards, class RecommendationWidget *recommendations);
     void openRecipe(int recipeId);
+    bool loadRecipeDetails(RecipeDetailsWidget *widget, int recipeId);
     bool m_showRecipeSteps = false;
     void openCooking(int recipeId, const QString &eventId = {});
     void refreshPending();

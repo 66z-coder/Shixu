@@ -1,5 +1,12 @@
+#include "ui/WheelGuard.h"
 #include "recognition/PackagingEntryWidget.h"
 #include "recognition/PackagingDateParser.h"
+#include "model/FoodCategory.h"
+#include "recognition/FoodCategorySuggestion.h"
+#include <QCalendarWidget>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QSignalBlocker>
 #include <QLineEdit>
 #include <QComboBox>
 #include <QSpinBox>
@@ -35,11 +42,11 @@ public:
         setMinimumWidth(0);
         setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
         setFixedHeight(144);
-        setText("尚未导入包装图片");
+        setText("选择文件或拖入一张本地图片");
     }
     void showImage(const QImage& image) {
         original_ = QPixmap::fromImage(image);
-        setText(original_.isNull() ? QStringLiteral("尚未导入包装图片") : QString());
+        setText(original_.isNull() ? QStringLiteral("选择文件或拖入一张本地图片") : QString());
         update();
     }
 protected:
@@ -101,6 +108,7 @@ QString weightText(double grams)
 
 PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
 {
+    Shixu::installWheelGuard();
     setWindowTitle("食序 - 包装日期识别与食材录入");
     resize(1100, 800);
     setObjectName("packagingEntry");
@@ -108,38 +116,21 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     setStyleSheet(QStringLiteral(R"(
         QWidget#packagingEntry { background: #EDF7F9; color: #24465B; font-size: 14px; }
         QWidget#entryEditor, QScrollArea#entryScroll { background: transparent; border: 0; }
-        QFrame[entryCard="true"] { background: #FFFFFF; border: 1px solid #E1EDF0; border-radius: 16px; }
+        QFrame[entryCard="true"] { background: #FFFFFF; border: 1px solid #E1EDF0; border-radius: 14px; }
         QLabel { color: #38586C; background: transparent; border: 0; }
         QLabel[entryHeading="true"] { color: #244E6A; font-size: 18px; font-weight: 600; }
-        QLabel[entryHint="true"] { color: #7893A0; font-size: 13px; }
+        QLabel[entryHint="true"] { color: #627E90; font-size: 12px; }
         QLabel#packagePreview { background: #EFF7FA; border: 1px dashed #C8DEE8; border-radius: 10px; color: #7893A0; }
         QLabel#entryStatus, QLabel#entrySummary { background: #EFF7FA; border-radius: 8px; padding: 10px; }
-        QLineEdit, QComboBox, QAbstractSpinBox, QPlainTextEdit {
-            background: #FCFDFB; color: #24465B; border: 1px solid #CFDFE7;
-            border-radius: 8px; padding: 6px 10px; selection-background-color: #DCEEF8; selection-color: #17416B;
-        }
-        QComboBox QLineEdit, QAbstractSpinBox QLineEdit { border: 0; padding: 0; background: transparent; }
-        QLineEdit:focus, QComboBox:focus, QAbstractSpinBox:focus, QPlainTextEdit:focus { border-color: #5599C4; }
-        QLineEdit:disabled, QComboBox:disabled, QAbstractSpinBox:disabled { background: #F2F6F8; color: #8CA0AB; border-color: #E1EDF0; }
-        QPushButton { background: #EFF7FA; color: #315F7B; border: 1px solid #CFDFE7; border-radius: 8px; padding: 6px 10px; }
-        QPushButton:hover { background: #DCEEF8; border-color: #93BED6; }
-        QPushButton:pressed { background: #C8E2F1; }
-        QPushButton:focus { border: 1px solid #387FAB; }
-        QPushButton#saveFood, QPushButton#submitCandidate { background: #2879AC; color: white; border-color: #2879AC; font-weight: 600; }
-        QPushButton#saveFood:hover, QPushButton#submitCandidate:hover { background: #216994; }
-        QPushButton#deleteFood { color: #AF5D61; background: transparent; border-color: #EBDADD; }
-        QPushButton#deleteFood:hover { background: #FCF1F2; }
-        QPushButton:disabled, QPushButton#saveFood:disabled, QPushButton#submitCandidate:disabled, QPushButton#deleteFood:disabled {
-            background: #F0F4F6; color: #94A7B2; border-color: #E1E9ED;
-        }
         QListWidget { background: #FFFFFF; color: #38586C; border: 1px solid #E1EDF0; border-radius: 10px; padding: 4px; outline: 0; }
         QListWidget::item { padding: 12px 8px; border-bottom: 1px solid #EDF3F6; }
         QListWidget::item:selected { background: #DCEEF8; color: #17416B; border-radius: 6px; }
         QListWidget::item:hover { background: #EFF7FA; }
+        QListWidget::item:selected:hover { background:#DCEEF8; }
         QCheckBox { color: #38586C; spacing: 8px; }
     )"));
     auto* root = new QHBoxLayout(this);
-    root->setContentsMargins(24, 24, 24, 24);
+    root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(16);
     auto* scroll = new QScrollArea(this);
     scroll->setObjectName("entryScroll");
@@ -164,7 +155,7 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     auto* recognitionCard = makeCard(editor);
     recognitionCard->setObjectName("packageDropArea");
     auto* layout = new QVBoxLayout(recognitionCard);
-    layout->setContentsMargins(16, 16, 16, 16);
+    layout->setContentsMargins(20, 20, 20, 20);
     layout->setSpacing(12);
     layout->addWidget(heading("包装日期识别", recognitionCard));
     sections->addWidget(recognitionCard);
@@ -173,7 +164,7 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     auto* batchCard = makeCard(this);
     batchCard->setMinimumWidth(220);
     auto* batch = new QVBoxLayout(batchCard);
-    batch->setContentsMargins(16, 16, 16, 16);
+    batch->setContentsMargins(20, 20, 20, 20);
     batch->setSpacing(12);
     batch->addWidget(heading("待提交食材", batchCard));
     auto* batchHint = new QLabel("逐项添加后统一提交\n双击列表中的食材可修改", batchCard);
@@ -185,8 +176,8 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     batch->addWidget(list_, 1);
     edit_ = new QPushButton("修改选中食材", this); edit_->setObjectName("editFood");
-    remove_ = new QPushButton("删除选中食材", this); remove_->setObjectName("deleteFood");
-    submit_ = new QPushButton("确认提交全部食材", this); submit_->setObjectName("submitCandidate");
+    remove_ = new QPushButton("删除选中食材", this); remove_->setObjectName("deleteFood"); remove_->setProperty("danger", true);
+    submit_ = new QPushButton("确认提交全部食材", this); submit_->setObjectName("submitCandidate"); submit_->setProperty("primary", true);
     batch->addWidget(edit_); batch->addWidget(remove_); batch->addWidget(submit_);
     root->addWidget(batchCard, 2);
     auto* intro = new QLabel("可导入或拖入一张本地包装图片，点击识别后核对日期；也可直接手动录入。", this);
@@ -221,16 +212,19 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     layout->addWidget(status_);
     auto* foodCard = makeCard(editor);
     layout = new QVBoxLayout(foodCard);
-    layout->setContentsMargins(16, 16, 16, 16);
+    layout->setContentsMargins(20, 20, 20, 20);
     layout->setSpacing(12);
     layout->addWidget(heading("食材信息", foodCard));
     sections->addWidget(foodCard);
     sections->addStretch();
     auto* form = new QFormLayout();
+    form_ = form;
     form->setSpacing(12);
     form->setRowWrapPolicy(QFormLayout::WrapAllRows);
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     name_ = new QLineEdit(this); name_->setObjectName("foodName");
+    category_ = new QComboBox(this); category_->setObjectName("foodCategory");
+    category_->addItems(foodCategories()); category_->setCurrentText(QStringLiteral("其他"));
     quantity_ = new QDoubleSpinBox(this); quantity_->setObjectName("foodQuantity");
     quantity_->setDecimals(1); quantity_->setRange(.1, 9999); quantity_->setValue(1);
     unit_ = new QComboBox(this); unit_->setObjectName("foodUnit"); unit_->setEditable(true);
@@ -240,13 +234,32 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     mode_->addItems({"请选择日期依据", "已知到期日期（识别或手动填写）", "生产日期＋保质期", "到期日期未知（手动录入）", "从今天起保存"});
     expiry_ = new QLineEdit(this); expiry_->setObjectName("expiryDate");
     production_ = new QLineEdit(this); production_->setObjectName("productionDate");
-    expiry_->setPlaceholderText("YYYY-MM-DD，不自动填今天");
-    production_->setPlaceholderText("YYYY-MM-DD，信息缺失时请补充");
+    expiry_->setPlaceholderText("请选择到期日期"); production_->setPlaceholderText("请选择生产日期");
+    auto dateRow = [this](QLineEdit *field) {
+        auto *row = new QWidget(this); auto *box = new QHBoxLayout(row);
+        box->setContentsMargins(0, 0, 0, 0); box->addWidget(field, 1);
+        field->setReadOnly(true);
+        auto *choose = new QPushButton(QStringLiteral("选择日期"), row); box->addWidget(choose);
+        connect(choose, &QPushButton::clicked, this, [this, field] {
+            QDialog dialog(this); dialog.setWindowTitle(QStringLiteral("选择日期"));
+            auto *layout = new QVBoxLayout(&dialog); auto *calendar = new QCalendarWidget(&dialog);
+            const QDate current = QDate::fromString(field->text(), Qt::ISODate);
+            calendar->setSelectedDate(current.isValid() ? current : QDate::currentDate());
+            layout->addWidget(calendar);
+            auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            layout->addWidget(buttons);
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+            if (dialog.exec() == QDialog::Accepted) field->setText(calendar->selectedDate().toString(Qt::ISODate));
+        });
+        return row;
+    };
+    expiryRow_ = dateRow(expiry_); productionRow_ = dateRow(production_);
     period_ = new OptionalIntSpinBox(this, "请输入保质期"); period_->setObjectName("shelfLife");
     period_->setRange(0, 10000);
     periodUnit_ = new QComboBox(this); periodUnit_->setObjectName("shelfLifeUnit");
     periodUnit_->addItems({"天", "月", "年"});
-    form->addRow("食材名称", name_); form->addRow("数量", quantity_); form->addRow("单位", unit_);
+    form->addRow("食材名称", name_); form->addRow("分类（自动建议，可修改）", category_); form->addRow("数量", quantity_); form->addRow("单位", unit_);
     unitWeight_ = new OptionalDoubleSpinBox(this, "可选，未填写表示重量未知"); unitWeight_->setObjectName("gramsPerUnit");
     unitWeight_->setDecimals(1); unitWeight_->setRange(0, 1000000);
     unitWeightLabel_ = new QLabel(this);
@@ -254,8 +267,8 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     totalWeight_ = new QLabel(this); totalWeight_->setObjectName("totalWeight");
     totalWeight_->setWordWrap(true);
     form->addRow("总重量", totalWeight_);
-    form->addRow("日期依据", mode_); form->addRow("明确到期日", expiry_);
-    form->addRow("生产日期", production_); form->addRow("保质期数值", period_);
+    form->addRow("日期依据", mode_); form->addRow("明确到期日", expiryRow_);
+    form->addRow("生产日期", productionRow_); form->addRow("保质期数值", period_);
     form->addRow("保质期单位", periodUnit_);
     storageDays_ = new OptionalIntSpinBox(this, "请输入天数，例如 3"); storageDays_->setObjectName("storageDays");
     storageDays_->setRange(0, 10000);
@@ -266,7 +279,7 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     layout->addWidget(computed_);
     confirmed_ = new QCheckBox("已核对当前食材信息和日期\n（如未知，已明确选择未知）", this);
     confirmed_->setObjectName("confirmed"); layout->addWidget(confirmed_);
-    save_ = new QPushButton("添加食材到列表", this); save_->setObjectName("saveFood");
+    save_ = new QPushButton("添加食材到列表", this); save_->setObjectName("saveFood"); save_->setProperty("primary", true);
     reset_ = new QPushButton("清空表单 / 取消修改", this); reset_->setObjectName("resetForm");
     layout->addWidget(save_); layout->addWidget(reset_);
     QList<QWidget*> dropTargets=recognitionCard->findChildren<QWidget*>();dropTargets.append(recognitionCard);
@@ -318,7 +331,16 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     connect(unitWeight_, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, changed);
     // 换商品或单位后清除旧单件重量，避免把一个的重量误用于一盒。
     connect(unit_, &QComboBox::currentTextChanged, this, [this] { unitWeight_->setValue(0); });
-    connect(name_, &QLineEdit::textChanged, this, [this] { unitWeight_->setValue(0); });
+    connect(name_, &QLineEdit::textChanged, this, [this] {
+        unitWeight_->setValue(0);
+        if (!categoryManual_) {
+            QSignalBlocker blocker(category_);
+            category_->setCurrentText(suggestFoodCategory(normalizer_.normalizeFoodName(name_->text())));
+        }
+        refresh();
+    });
+    connect(category_, QOverload<int>::of(&QComboBox::activated), this, [this](int) { categoryManual_ = true; });
+    connect(category_, &QComboBox::currentTextChanged, this, changed);
     connect(period_, QOverload<int>::of(&QSpinBox::valueChanged), this, changed);
     connect(storageDays_, QOverload<int>::of(&QSpinBox::valueChanged), this, changed);
     connect(mode_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
@@ -336,7 +358,7 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
                     mode_->currentIndex(), period_->value(), periodUnit_->currentIndex(), storageDays_->value(), storageStart_};
         QString text = QString("%1 × %2 %3 | 到期：%4").arg(candidate.name).arg(candidate.quantity)
             .arg(candidate.unit, candidate.expiryDate.isValid() ? candidate.expiryDate.toString(Qt::ISODate) : QStringLiteral("未知"));
-        text += " | " + weightText(candidate.totalWeightGrams);
+        text += " | " + candidate.category + " | " + weightText(candidate.totalWeightGrams);
         if (editingRow_ >= 0) {
             entries_[editingRow_] = entry;
             list_->item(editingRow_)->setText(text);
@@ -404,7 +426,7 @@ bool PackagingEntryWidget::loadImageFile(const QString& path)
     static_cast<PackagingPreview*>(preview_)->showImage(image);
     raw_->clear(); production_->clear(); expiry_->clear(); period_->setValue(0); mode_->setCurrentIndex(0);
     confirmed_->setChecked(false); recognize_->setEnabled(true);
-    status_->setText("图片已导入，请识别包装文字");
+    status_->setText(QStringLiteral("已导入：%1。请识别包装文字。").arg(QFileInfo(path).fileName()));
     refresh();
     return true;
 }
@@ -452,6 +474,7 @@ void PackagingEntryWidget::parseText()
 QString PackagingEntryWidget::validate(FoodCandidate& candidate) const
 {
     candidate.name = normalizer_.normalizeFoodName(name_->text());
+    candidate.category = category_->currentText();
     candidate.quantity = quantity_->value();
     candidate.unit = normalizer_.normalizeUnit(unit_->currentText());
     if (candidate.unit == "g") candidate.totalWeightGrams = candidate.quantity;
@@ -468,8 +491,6 @@ QString PackagingEntryWidget::validate(FoodCandidate& candidate) const
     if (mode_->currentIndex() == 1) {
         candidate.expiryDate = PackagingDateParser::parseDate(expiry_->text());
         if (!candidate.expiryDate.isValid()) return "请补充有效的完整到期日期（四位年份）";
-        if (!production_->text().trimmed().isEmpty() && !production.isValid()) return "填写的生产日期无效";
-        if (production.isValid() && candidate.expiryDate < production) return "到期日早于生产日期，请核对";
     } else if (mode_->currentIndex() == 2) {
         if (!production.isValid()) return "请补充有效的完整生产日期";
         if (period_->value() <= 0) return "请补充明确的保质期数值";
@@ -491,9 +512,9 @@ void PackagingEntryWidget::refresh()
     const bool calculated = mode_->currentIndex() == 2;
     const bool fromToday = mode_->currentIndex() == 4;
     storageDays_->setVisible(fromToday); storageDaysLabel_->setVisible(fromToday);
-    expiry_->setEnabled(mode_->currentIndex() == 1);
-    production_->setEnabled(mode_->currentIndex() == 1 || calculated);
-    period_->setEnabled(calculated); periodUnit_->setEnabled(calculated);
+    form_->setRowVisible(expiryRow_, mode_->currentIndex() == 1);
+    form_->setRowVisible(productionRow_, calculated);
+    form_->setRowVisible(period_, calculated); form_->setRowVisible(periodUnit_, calculated);
     const QString normalizedUnit = normalizer_.normalizeUnit(unit_->currentText());
     const bool countUnit = isCountUnit(normalizedUnit);
     unitWeight_->setVisible(countUnit); unitWeightLabel_->setVisible(countUnit);
@@ -531,6 +552,7 @@ void PackagingEntryWidget::clearForm()
     editingRow_ = -1;
     storageStart_ = QDate(); storageDays_->setValue(0);
     raw_->clear(); name_->clear(); production_->clear(); expiry_->clear();
+    categoryManual_ = false; category_->setCurrentText(QStringLiteral("其他"));
     period_->setValue(0); periodUnit_->setCurrentIndex(0); mode_->setCurrentIndex(0);
     unitWeight_->setValue(0);
     unit_->setCurrentIndex(0); quantity_->setValue(1); confirmed_->setChecked(false);
@@ -555,6 +577,7 @@ void PackagingEntryWidget::editSelected()
     storageStart_ = entry.storageStart; storageDays_->setValue(entry.storageDays);
     raw_->setPlainText(entry.raw);
     name_->setText(entry.food.name); quantity_->setValue(entry.food.quantity); unit_->setCurrentText(entry.food.unit);
+    category_->setCurrentText(entry.food.category); categoryManual_ = true;
     unitWeight_->setValue(entry.food.gramsPerUnit);
     production_->setText(entry.production); expiry_->setText(entry.expiry);
     period_->setValue(entry.period); periodUnit_->setCurrentIndex(entry.periodUnit); mode_->setCurrentIndex(entry.mode);

@@ -142,6 +142,8 @@ if(QT_FOUND)
             tests/ui/RecommendationWidgetTest.cpp
             include/ui/RecommendationWidget.h
             src/ui/RecommendationWidget.cpp
+            include/ui/RecipeDetailsWidget.h
+            src/ui/RecipeDetailsWidget.cpp
         )
         target_include_directories(RecommendationWidgetTest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
         target_link_libraries(RecommendationWidgetTest PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
@@ -307,7 +309,8 @@ endif()
 if(QT_FOUND AND BUILD_TESTING)
     add_executable(LegacyRoutingTest tests/ui/LegacyRoutingTest.cpp
         include/ui/HomeWidget.h src/ui/HomeWidget.cpp
-        include/ui/RecommendationWidget.h src/ui/RecommendationWidget.cpp)
+        include/ui/RecommendationWidget.h src/ui/RecommendationWidget.cpp
+        include/ui/RecipeDetailsWidget.h src/ui/RecipeDetailsWidget.cpp)
     target_link_libraries(LegacyRoutingTest PRIVATE ShixuReward Qt${QT_VERSION_MAJOR}::Widgets)
     add_test(NAME LegacyRoutingTest COMMAND LegacyRoutingTest)
     set_tests_properties(LegacyRoutingTest PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
@@ -335,4 +338,18 @@ if(QT_FOUND AND BUILD_TESTING)
     target_include_directories(ProfileStoreTest PRIVATE include)
     target_link_libraries(ProfileStoreTest PRIVATE Qt${QT_VERSION_MAJOR}::Core)
     add_test(NAME ProfileStoreTest COMMAND ProfileStoreTest)
+endif()
+
+if(QT_FOUND AND BUILD_TESTING)
+    add_executable(WheelGuardTest tests/ui/WheelGuardTest.cpp)
+    target_include_directories(WheelGuardTest PRIVATE include)
+    target_link_libraries(WheelGuardTest PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
+    add_test(NAME WheelGuardTest COMMAND WheelGuardTest)
+    set_tests_properties(WheelGuardTest PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+endif()
+
+if(WIN32 AND TARGET Shixu)
+    enable_language(RC)
+    configure_file(resources/shixu.rc.in ${CMAKE_CURRENT_BINARY_DIR}/shixu.rc @ONLY)
+    target_sources(Shixu PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/shixu.rc)
 endif()

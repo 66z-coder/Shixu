@@ -1,15 +1,28 @@
 #include "contracts/ActivityContracts.h"
 #include "contracts/ServiceFactories.h"
+#include "core/AppClock.h"
 #include "inventory/inventory.h"
 #include "recipe/RecipeService.h"
 #include "reward/RewardSystem.h"
 #include "ui/StatisticsWidget.h"
 #include <QApplication>
 #include <QDir>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFile>
+#include <QFont>
+#include <QFontDatabase>
 #include <QLabel>
+#include <QLineEdit>
+#include <QLockFile>
+#include <QPushButton>
+#include <QProgressBar>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <iostream>
+#include <cmath>
 #include <stdexcept>
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
@@ -91,6 +104,14 @@ struct Rewards : V::IRewardService {
         return real.getGrowthSnapshot(date);
     }
 };
+struct GoalActivity final : V::ICookingActivityService {
+    V::CookingActivitySnapshot snapshot;
+    std::string requestedDate;
+    V::QueryResult<V::CookingActivitySnapshot> refresh(const V::LocalDate &date) override {
+        requestedDate = date;
+        return {{V::OperationStatus::Succeeded, V::ErrorCode::None, {}}, snapshot};
+    }
+};
 QByteArray readFile(const QString &path) {
     QFile f(path);
     check(f.open(QIODevice::ReadOnly), "read file");
@@ -103,6 +124,14 @@ void writeFile(const QString &path, const QByteArray &bytes) {
 }
 int main(int argc, char **argv) {
     QApplication app(argc, argv);
+#ifdef Q_OS_WIN
+    if (QGuiApplication::platformName() == "offscreen") {
+        int font = QFontDatabase::addApplicationFont(qEnvironmentVariable("WINDIR") + "/Fonts/msyh.ttc");
+        if (font >= 0)
+            app.setFont(QFont(QFontDatabase::applicationFontFamilies(font).first(), 10));
+    }
+#endif
+
     try {
         QTemporaryDir dir(QDir::currentPath() + "/activity-XXXXXX");
         check(dir.isValid(), "temporary directory");
@@ -139,6 +168,11 @@ int main(int argc, char **argv) {
             check(ok(r.outcome) && r.value.totalCookingCount == 0 && r.value.legacyMeals.size() == 1 &&
                       r.value.achievements.empty(),
                   "legacy displayed but not counted");
+            {
+                StatisticsWidget empty(&rewards, nullptr, activity.get());
+                check(empty.findChild<QLabel *>("recentMealsHeading")->text() == QStringLiteral("最近做饭 · 显示 0 条"),
+                      "empty history displays zero records");
+            }
             auto request = [](int id, int recipe, const char *time) {
                 V::CookingCompletionRequest r;
                 r.eventId = "123e4567-e89b-42d3-a456-4266141740" +
@@ -233,13 +267,173 @@ int main(int argc, char **argv) {
             widget.refresh();
             check(widget.findChild<QLabel *>("verifiedCookingCount")->text() == QStringLiteral("6 次"),
                   "statistics uses completed C meals");
-            check(widget.findChild<QLabel *>("legacyCookingMeals")->text().contains("2026-10-27"),
-                  "legacy visible separately");
+            check(widget.findChild<QLabel *>("achievementCount")->text() == QStringLiteral("已获得 4 / 4 枚成就") &&
+                      !widget.findChild<QLabel *>("checkInBadges"),
+                  "achievement count matches four visible cooking badges");
+            check(widget.findChild<QLabel *>("recentMealsHeading")->text() == QStringLiteral("最近做饭 · 显示 6 条"),
+                  "heading uses actual displayed count");
+            const auto today = activity->refresh(Shixu::appNow().date().toString(Qt::ISODate).toStdString());
+            check(widget.findChild<QLabel *>("todayMealCount")->text() == QStringLiteral("%1 次").arg(today.value.todayMealCount) &&
+                  widget.findChild<QLabel *>("todayCalories")->text() == QStringLiteral("%1 千卡").arg(today.value.todayNutrition.calories, 0, 'f', 0),
+                  "overview displays real current-day totals");
+            check(widget.findChild<QProgressBar *>("goalBar1")->value() == 0 &&
+                  widget.findChild<QLabel *>("goalValue1")->text().contains(QStringLiteral("未设置目标")),
+                  "unset nutrition goal displays no progress");
+            check(!widget.findChild<QLabel *>("legacyCookingMeals"), "legacy records have no UI entry");
+            check(activity->refresh("2026-10-30").value.legacyMeals.size() == 1, "legacy data preserved");
+            const auto legacyRecipe = c.findRecipeById(1).value;
+            for (int i = 0; i < 11; ++i)
+                recordMeal(legacyRecipe, 1, "2026-10-27 13:00:00");
+            const auto summary = activity->refresh("2026-10-27");
+            const auto expected = calculateNutrition(legacyRecipe, 1);
+            check(ok(summary.outcome) && summary.value.todayMealCount == 12 &&
+                      std::abs(summary.value.todayNutrition.calories - expected.calories * 12) < 0.01 &&
+                      std::abs(summary.value.todayNutrition.protein - expected.protein * 12) < 0.01,
+                  "today nutrition counts all records, including beyond recent ten");
+            const auto completedDay = activity->refresh("2026-10-30");
+            check(completedDay.value.todayMealCount == 3, "completed events counted on their own day");
+            auto *checkIn = widget.findChild<QPushButton *>("growthCheckIn");
+            check(checkIn && !checkIn->isEnabled(), "cooking auto checkin disables same-day button");
+            auto before = rewards.getGrowthSnapshot("2026-10-29").value.totalPoints;
+            checkIn->click();
+            check(rewards.getGrowthSnapshot("2026-10-29").value.totalPoints == before,
+                  "disabled repeat adds no points");
+            const auto output = qEnvironmentVariable("SHIXU_UI_CAPTURE_DIR");
+            if (!output.isEmpty()) {
+                QDir().mkpath(output);
+                widget.resize(1000, 800);
+                widget.show();
+                QApplication::processEvents();
+                check(widget.grab().save(output + "/growth-unlocked.png"), "capture unlocked growth");
+                auto *scroll = widget.findChild<QScrollArea *>();
+                scroll->verticalScrollBar()->setValue(scroll->verticalScrollBar()->maximum());
+                QApplication::processEvents();
+                check(widget.grab().save(output + "/growth-nutrition.png"), "capture nutrition and recent meals");
+                scroll->ensureWidgetVisible(widget.findChild<QLabel *>("todayMealCount"), 0, 120);
+                QApplication::processEvents();
+                check(widget.grab().save(output + "/growth-overview.png"), "capture nutrition overview");
+            }
+            {
+                RewardSystem manual(nullptr, dir.filePath("manual-reward.ini"));
+                StatisticsWidget daily(&manual, nullptr, activity.get());
+                auto *button = daily.findChild<QPushButton *>("growthCheckIn");
+                check(button->isEnabled(), "new day allows manual checkin");
+                button->click();
+                check(!button->isEnabled(), "manual checkin updates UI");
+                auto points =
+                    manual.getGrowthSnapshot(Shixu::appNow().date().toString(Qt::ISODate).toStdString())
+                        .value.totalPoints;
+                button->click();
+                check(manual.getGrowthSnapshot(Shixu::appNow().date().toString(Qt::ISODate).toStdString())
+                              .value.totalPoints == points,
+                      "manual double click no duplicate");
+            }
             c.readFail = true;
             widget.refresh();
             check(widget.findChild<QLabel *>("verifiedCookingCount")->text() == QStringLiteral("暂不可用") &&
+                      widget.findChild<QLabel *>("recentMealsHeading")->text() == QStringLiteral("最近做饭") &&
+                      widget.findChild<QLabel *>("todayCalories")->text() == QStringLiteral("暂不可用") &&
+                      widget.findChild<QProgressBar *>("goalBar1")->value() == 0 &&
                       !widget.findChild<QLabel *>("growthError")->text().isEmpty(),
                   "UI exposes source errors instead of zero");
+        }
+        {
+            const QString goalsDir = dir.filePath("goals");
+            check(QDir().mkpath(goalsDir), "create goals test directory");
+            RewardSystem rewards(nullptr, goalsDir + "/rewards.ini");
+            GoalActivity activity;
+            activity.snapshot.todayMealCount = 2;
+            activity.snapshot.todayNutrition = {240, 60, 10, 5};
+            StatisticsWidget widget(&rewards, nullptr, &activity);
+            auto *open = widget.findChild<QPushButton *>("editNutritionGoals");
+            auto *calories = widget.findChild<QLabel *>("goalValue0");
+            auto *protein = widget.findChild<QLabel *>("goalValue1");
+            auto *bar = widget.findChild<QProgressBar *>("goalBar0");
+            check(open && calories->text().contains(QStringLiteral("未设置目标")) && bar->value() == 0,
+                  "new user starts with no goals");
+            auto edit = [&](const QStringList &values, bool save) {
+                QTimer::singleShot(0, [&] {
+                    auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                    check(dialog && dialog->objectName() == "nutritionGoalsDialog", "goals dialog opened");
+                    for (int i = 0; i < 4; ++i)
+                        dialog->findChild<QLineEdit *>(QStringLiteral("nutritionGoalInput%1").arg(i))->setText(values[i]);
+                    auto *buttons = dialog->findChild<QDialogButtonBox *>();
+                    buttons->button(save ? QDialogButtonBox::Save : QDialogButtonBox::Cancel)->click();
+                });
+                open->click();
+            };
+            edit({"200", "", "", ""}, true);
+            check(calories->text().contains(QStringLiteral("240 / 200 千卡 · 120%")) && bar->value() == 1000 &&
+                      protein->text().contains(QStringLiteral("未设置目标")), "partial goals and over 100 percent");
+            edit({"999", "99", "99", "99"}, false);
+            check(calories->text().contains(QStringLiteral("240 / 200")), "cancel does not alter saved goals");
+            edit({"480", "120", "20", "10"}, true);
+            check(calories->text().contains(QStringLiteral("50%")) && bar->value() == 500 &&
+                      protein->text().contains(QStringLiteral("60.0 / 120 克 · 50%")), "all four targets update");
+            const auto goalCapture = qEnvironmentVariable("SHIXU_UI_CAPTURE_DIR");
+            if (!goalCapture.isEmpty()) {
+                QDir().mkpath(goalCapture);
+                widget.resize(980, 620);
+                widget.show();
+                QApplication::processEvents();
+                widget.findChild<QScrollArea *>()->ensureWidgetVisible(widget.findChild<QPushButton *>("editNutritionGoals"), 0, 15);
+                QApplication::processEvents();
+                check(widget.grab().save(goalCapture + "/nutrition-goals.png"), "capture goal progress");
+            }
+            bool validationShown = false;
+            QTimer::singleShot(0, [&] {
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                if (!dialog) return;
+                dialog->findChild<QLineEdit *>("nutritionGoalInput0")->setText("0");
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save)->click();
+                validationShown = dialog->isVisible() && !dialog->findChild<QLabel *>("nutritionGoalsError")->text().isEmpty();
+                dialog->reject();
+            });
+            open->click();
+            check(validationShown && calories->text().contains(QStringLiteral("240 / 480")),
+                  "invalid UI input stays open and leaves goal unchanged");
+            QLockFile held(goalsDir + "/nutrition-goals.json.lock");
+            check(held.tryLock(0), "lock goal settings for failure test");
+            bool failureShown = false;
+            QTimer::singleShot(0, [&] {
+                auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+                if (!dialog) return;
+                dialog->findChild<QLineEdit *>("nutritionGoalInput0")->setText("900");
+                dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Save)->click();
+                failureShown = dialog->isVisible() && !dialog->findChild<QLabel *>("nutritionGoalsError")->text().isEmpty();
+                dialog->reject();
+            });
+            open->click();
+            held.unlock();
+            check(failureShown && calories->text().contains(QStringLiteral("240 / 480")),
+                  "failed UI save keeps last saved target");
+            StatisticsWidget restored(&rewards, nullptr, &activity);
+            check(restored.findChild<QLabel *>("goalValue0")->text().contains(QStringLiteral("240 / 480")),
+                  "saved goals survive widget restart");
+            activity.snapshot.todayNutrition = {};
+            activity.snapshot.todayMealCount = 0;
+            restored.refresh();
+            check(restored.findChild<QProgressBar *>("goalBar0")->value() == 0 &&
+                  restored.findChild<QLabel *>("goalValue0")->text().contains(QStringLiteral("0%")) &&
+                  activity.requestedDate == Shixu::appNow().date().toString(Qt::ISODate).toStdString(),
+                  "empty day reports zero progress");
+            edit({"", "", "", ""}, true);
+            check(calories->text().contains(QStringLiteral("未设置目标")) && bar->value() == 0,
+                  "clear goals returns to unset");
+            NutritionGoalsStore store(goalsDir + "/nutrition-goals.json");
+            NutritionGoals invalid{};
+            invalid[0] = -1;
+            QString error;
+            const auto before = readFile(goalsDir + "/nutrition-goals.json");
+            check(!store.save(invalid, error) && !error.isEmpty() &&
+                      readFile(goalsDir + "/nutrition-goals.json") == before, "invalid values leave saved file intact");
+            NutritionGoalsStore blocked(goalsDir + "/missing/nutrition-goals.json");
+            NutritionGoals valid{}; valid[0] = 200;
+            check(!blocked.save(valid, error) && !error.isEmpty(), "write failure reported");
+            writeFile(goalsDir + "/nutrition-goals.json", "broken");
+            NutritionGoals original{}; original[0] = 123;
+            check(!store.load(original, error) && original[0] == 123 && !store.save(valid, error) &&
+                      readFile(goalsDir + "/nutrition-goals.json") == "broken", "bad file preserved");
         }
         QDir::setCurrent(cwd);
         std::cout << "Cooking activity history, achievements, failures and UI PASS\n";

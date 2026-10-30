@@ -1,6 +1,7 @@
 #include "recognition/ReceiptOcrService.h"
 
 #include <QDir>
+#include <QCoreApplication>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -87,8 +88,10 @@ void ReceiptOcrService::collectDiagnostics()
 void ReceiptOcrService::start(const QString& imagePath)
 {
     if (busy_) return;
-    const QDir root(QString::fromUtf8(SHIXU_PROJECT_DIR));
-    const QString python = setting("SHIXU_OCR_PYTHON", root.filePath(".venv-ocr/Scripts/python.exe"));
+    const QDir appDir(QCoreApplication::applicationDirPath());
+    const bool bundled = QFileInfo(appDir.filePath("ocr/receipt_ocr.py")).isFile();
+    const QDir root(bundled ? appDir : QDir(QString::fromUtf8(SHIXU_PROJECT_DIR)));
+    const QString python = setting("SHIXU_OCR_PYTHON", root.filePath(bundled ? "runtime/python/python.exe" : ".venv-ocr/Scripts/python.exe"));
     const QString script = setting("SHIXU_OCR_SCRIPT", root.filePath("ocr/receipt_ocr.py"));
     const QString models = setting("SHIXU_OCR_MODELS", root.filePath("ocr/models"));
     if (!QFileInfo(imagePath).isFile()) {
@@ -96,7 +99,9 @@ void ReceiptOcrService::start(const QString& imagePath)
         return;
     }
     if (!QFileInfo(python).isFile() || !QFileInfo(script).isFile()) {
-        emit completed(failure(QStringLiteral("本地 OCR 环境未准备好，请按 docs/local_ocr.md 安装")));
+        emit completed(failure(bundled
+            ? QStringLiteral("尚未安装离线图片识别扩展。请将扩展包中的 runtime 和 ocr 文件夹解压到 Shixu.exe 所在目录；也可以继续手动录入食材。")
+            : QStringLiteral("本地 OCR 环境未准备好，请按 docs/local_ocr.md 安装")));
         return;
     }
     temporary_ = std::make_unique<QTemporaryDir>();

@@ -23,6 +23,7 @@ public:
     void addFood(const FoodCandidate& candidate);
     // All-or-nothing batch insert. Unknown weight is zero; errors leave no partial batch.
     bool addFoods(const QList<FoodCandidate>& foods, QString* error = nullptr);
+    bool updateFood(const FoodCandidate& food, QString* error = nullptr);
     // Integration supplies A's canonicalizer; mutate names and revision atomically.
     bool normalizeNames(const std::function<QString(const QString&)>& normalize, QString* error);
 

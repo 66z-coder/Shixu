@@ -10,6 +10,7 @@
 struct UserProfile {
     QString nickname = QStringLiteral("食序用户");
     int avatar = 0;
+    QString avatarImage; // Optional base64 PNG; older profiles keep their built-in avatar.
     Shixu::Contracts::V1::InventoryPolicy policy = Shixu::Contracts::V1::InventoryPolicy::PreferInventory;
     QStringList excluded;
 };
@@ -23,7 +24,7 @@ class UserProfileStore {
         if (!error.isEmpty())
             return false;
         if (next.nickname.trimmed().isEmpty() || next.nickname.size() > 30 || next.avatar < 0 ||
-            next.avatar > 3 || int(next.policy) < 0 || int(next.policy) > 2)
+            next.avatar > 3 || next.avatarImage.size() > 1400000 || int(next.policy) < 0 || int(next.policy) > 2)
             return false;
         QJsonArray excluded;
         for (const auto &name : next.excluded)
@@ -31,7 +32,10 @@ class UserProfileStore {
         QJsonObject o{{"version", 1},
                       {"nickname", next.nickname.trimmed()},
                       {"avatar", next.avatar},
-                      {"policy", int(next.policy)},
+                      {"avatarImage", next.avatarImage},
+                      {"policy", next.policy == Shixu::Contracts::V1::InventoryPolicy::SmallPurchase
+                                     ? int(Shixu::Contracts::V1::InventoryPolicy::PreferInventory)
+                                     : int(next.policy)},
                       {"excluded", excluded}};
         QSaveFile file(path_);
         file.setDirectWriteFallback(false);
@@ -39,6 +43,8 @@ class UserProfileStore {
         if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit())
             return false;
         value = next;
+        if (value.policy == Shixu::Contracts::V1::InventoryPolicy::SmallPurchase)
+            value.policy = Shixu::Contracts::V1::InventoryPolicy::PreferInventory;
         value.nickname = value.nickname.trimmed();
         if (changed)
             changed();
@@ -63,7 +69,8 @@ class UserProfileStore {
             o["nickname"].toString().trimmed().isEmpty() || o["nickname"].toString().size() > 30 ||
             !o["avatar"].isDouble() || o["avatar"].toInt(-1) < 0 || o["avatar"].toInt() > 3 ||
             !o["policy"].isDouble() || o["policy"].toInt(-1) < 0 || o["policy"].toInt() > 2 ||
-            !o["excluded"].isArray()) {
+            !o["excluded"].isArray() ||
+            (o.contains("avatarImage") && (!o["avatarImage"].isString() || o["avatarImage"].toString().size() > 1400000))) {
             error = QStringLiteral("个人资料已损坏，请保留原文件；暂不可保存或推荐。");
             return;
         }
@@ -76,6 +83,9 @@ class UserProfileStore {
         }
         value.nickname = o["nickname"].toString();
         value.avatar = o["avatar"].toInt();
+        value.avatarImage = o.value("avatarImage").toString();
         value.policy = static_cast<Shixu::Contracts::V1::InventoryPolicy>(o["policy"].toInt());
+        if (value.policy == Shixu::Contracts::V1::InventoryPolicy::SmallPurchase)
+            value.policy = Shixu::Contracts::V1::InventoryPolicy::PreferInventory;
     }
 };

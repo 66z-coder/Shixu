@@ -83,10 +83,19 @@ class ActivityService final : public ICookingActivityService {
         if (!ok(meals.outcome))
             return {meals.outcome, {}};
         CookingActivitySnapshot out;
+        auto addToday = [&](const MealRecord &meal) {
+            if (meal.date != referenceDate) return;
+            ++out.todayMealCount;
+            out.todayNutrition.calories += meal.nutrition.calories;
+            out.todayNutrition.protein += meal.nutrition.protein;
+            out.todayNutrition.carbohydrates += meal.nutrition.carbohydrates;
+            out.todayNutrition.fat += meal.nutrition.fat;
+        };
         std::map<EventId, MealRecord> byEvent;
         for (const auto &meal : meals.value) {
             if (meal.eventId.empty()) {
                 out.legacyMeals.push_back(meal);
+                addToday(meal);
                 continue;
             }
             if (!byEvent.emplace(meal.eventId, meal).second)
@@ -131,6 +140,7 @@ class ActivityService final : public ICookingActivityService {
             if (expiring)
                 ++out.expiringCookingCount;
             out.recentMeals.push_back(meal->second);
+            addToday(meal->second);
             recipeIds.insert(meal->second.recipeId);
             const QDate day = QDate::fromString(QString::fromStdString(meal->second.date), Qt::ISODate);
             if (cookingDates.insert(day).second) {

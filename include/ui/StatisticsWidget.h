@@ -1,33 +1,41 @@
 #pragma once
-
+#include "contracts/ActivityContracts.h"
+#include "core/NutritionGoals.h"
 #include <QVector>
 #include <QWidget>
-#include "contracts/ActivityContracts.h"
-
 class QLabel;
+class QPushButton;
+class QGridLayout;
+class QVBoxLayout;
+class QProgressBar;
 class RewardSystem;
-
-class StatisticsWidget : public QWidget
-{
-public:
-    explicit StatisticsWidget(RewardSystem* rewards, QWidget* parent = nullptr,
-        Shixu::Contracts::V1::ICookingActivityService* activity = nullptr);
+class StatisticsWidget : public QWidget {
+  public:
+    explicit StatisticsWidget(RewardSystem *, QWidget *parent = nullptr,
+                              Shixu::Contracts::V1::ICookingActivityService *activity = nullptr);
     void refresh();
 
-private:
-    Shixu::Contracts::V1::ICookingActivityService* m_activity = nullptr;
-    QLabel* m_error = nullptr;
-    QLabel* m_expiring = nullptr;
-    QLabel* m_cookingStreak = nullptr;
-    QLabel* m_recentMeals = nullptr;
-    QLabel* m_legacyMeals = nullptr;
-    QLabel* m_cookingAchievements = nullptr;
+  protected:
+    void resizeEvent(QResizeEvent *) override;
 
-    RewardSystem* m_rewards;
-    QLabel* m_total = nullptr;
-    QLabel* m_cooking = nullptr;
-    QLabel* m_streak = nullptr;
-    QLabel* m_points = nullptr;
-    QLabel* m_achievements = nullptr;
-    QVector<QLabel*> m_recentDays;
+  private:
+    void arrangeBadges();
+    void editNutritionGoals();
+    RewardSystem *m_rewards;
+    Shixu::Contracts::V1::ICookingActivityService *m_activity;
+    QLabel *m_error, *m_status, *m_points, *m_cooking, *m_expiring, *m_total, *m_streak, *m_cookingStreak,
+        *m_achievements, *m_recentMeals, *m_nutrition, *m_cookingAchievements,
+        *m_todayDate, *m_todayCount, *m_todayCalories, *m_mealHeading;
+    QVector<QLabel *> m_goalValues;
+    QVector<QProgressBar *> m_goalBars;
+    QLabel *m_goalStatus = nullptr;
+    QPushButton *m_goalButton = nullptr;
+    NutritionGoals m_goals{};
+    NutritionGoalsStore m_goalsStore;
+    bool m_goalsReadable = true;
+    QVBoxLayout *m_mealRows = nullptr;
+    QPushButton *m_checkIn, *m_details;
+    QGridLayout *m_badgeLayout;
+    QVector<QWidget *> m_badges;
+    QVector<QLabel *> m_recentDays;
 };

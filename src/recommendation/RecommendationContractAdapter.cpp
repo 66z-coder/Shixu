@@ -1,5 +1,6 @@
 #include "contracts/RecommendationContract.h"
 #include "recipe/RecipeService.h"
+#include "core/PantryStaples.h"
 
 #include <QDate>
 #include <algorithm>
@@ -35,10 +36,10 @@ double simple(const Recipe &r, int cap) {
     return .55 * tagged(r, {Tags::Quick, Tags::Easy}) + .30 * speed(r, cap) +
            .15 * std::max(0.0, 100.0 - 10.0 * r.steps.size());
 }
-double moodScore(const Recipe &r, Mood mood, double stock, int cap) {
+double moodScore(const Recipe &r, Mood mood) {
     switch (mood) {
     case Mood::Tired:
-        return .65 * simple(r, cap) + .35 * stock;
+        return std::max(0.0, 100.0 - 10.0 * r.steps.size());
     case Mood::WantGoodFood:
         return tagged(r, {Tags::Hearty, Tags::Appetizing});
     case Mood::LowAppetite:
@@ -129,6 +130,7 @@ bool finiteNutrition(const NutritionInfo &n) {
 QString stockReason(const Card &card) {
     QStringList gaps;
     for (const auto &a : card.availability) {
+        if (Shixu::isPantryStaple(a.foodName)) continue;
         if (a.state == AvailabilityState::Unknown)
             gaps << QStringLiteral("%1已知库存还差%2 g，另有重量未确认")
                         .arg(text(a.foodName))
@@ -231,7 +233,7 @@ class RecommendationService final : public IRecommendationService {
             if (evaluation.value.size() != merged.size())
                 return failed(ErrorCode::InvalidData, "库存评估未完整返回食材明细");
             std::set<std::string> assessed;
-            int enough = 0, shortage = 0, unknown = 0, expiring = 0;
+            int enough = 0, expiring = 0, regular = 0;
             Card card;
             for (const auto &a : evaluation.value) {
                 const auto required = merged.find(a.foodName);
@@ -242,17 +244,16 @@ class RecommendationService final : public IRecommendationService {
                     !std::isfinite(a.knownGapGrams) || a.knownGapGrams < 0 ||
                     a.state < AvailabilityState::Enough || a.state > AvailabilityState::Unknown)
                     return failed(ErrorCode::InvalidData, "库存评估明细无效");
+                if (Shixu::isPantryStaple(a.foodName)) continue;
+                ++regular;
                 enough += a.state == AvailabilityState::Enough;
-                shortage += a.state == AvailabilityState::Insufficient;
-                unknown += a.state == AvailabilityState::Unknown;
                 expiring += a.hasExpiringStock;
                 if (a.state == AvailabilityState::Enough)
                     card.availableIngredients << text(a.foodName);
                 else
                     card.missingIngredients << text(a.foodName);
             }
-            if ((p.inventoryPolicy == InventoryPolicy::OnlyInventory && enough != int(merged.size())) ||
-                (p.inventoryPolicy == InventoryPolicy::SmallPurchase && (unknown || shortage > 2)))
+            if (p.inventoryPolicy == InventoryPolicy::OnlyInventory && enough != regular)
                 continue;
             card.recipeId = recipe.id;
             card.dishName = text(recipe.name);
@@ -262,13 +263,15 @@ class RecommendationService final : public IRecommendationService {
             card.nutrition = calculateNutrition(recipe, 1);
             if (!finiteNutrition(card.nutrition))
                 return failed(ErrorCode::InvalidData, "菜谱营养数据无效");
-            card.ingredientMatchScore = 100.0 * enough / merged.size();
-            card.expiryUrgencyScore = 100.0 * expiring / merged.size();
-            card.moodMatchScore =
-                moodScore(recipe, p.mood, card.ingredientMatchScore, p.maxPreparationMinutes);
+            card.ingredientMatchScore = regular ? 100.0 * enough / regular : 100.0;
+            card.expiryUrgencyScore = regular ? 100.0 * expiring / regular : 0.0;
+            card.moodMatchScore = moodScore(recipe, p.mood);
             card.effectiveMaxPreparationMinutes = p.maxPreparationMinutes;
             card.preparationTimeReferenceMinutes = p.maxPreparationMinutes;
-            card.preparationTimeScore = speed(recipe, p.maxPreparationMinutes);
+            // For other moods the chosen limit is the requirement; do not reward
+            // a shorter dish merely for being shorter than the user requested.
+            card.preparationTimeScore = p.mood == Mood::Tired
+                ? speed(recipe, p.maxPreparationMinutes) : 100.0;
             card.nutritionScoreAvailable =
                 context.targetCaloriesPerServing > 0 && card.nutrition.calories > 0;
             if (card.nutritionScoreAvailable)
@@ -276,9 +279,9 @@ class RecommendationService final : public IRecommendationService {
                     100.0 * (1.0 - std::abs(card.nutrition.calories - context.targetCaloriesPerServing) /
                                        context.targetCaloriesPerServing),
                     0.0, 100.0);
-            double weight = .85;
-            double weighted = .35 * card.ingredientMatchScore + .25 * card.expiryUrgencyScore +
-                              .20 * card.moodMatchScore + .05 * card.preparationTimeScore;
+            double weight = 1.0;
+            double weighted = .20 * card.ingredientMatchScore + .10 * card.expiryUrgencyScore +
+                              .45 * card.moodMatchScore + .25 * card.preparationTimeScore;
             if (card.nutritionScoreAvailable) {
                 weight += .15;
                 weighted += .15 * card.nutritionScore;
@@ -295,6 +298,15 @@ class RecommendationService final : public IRecommendationService {
                 weighted += .35 * preferenceScore / preferenceCount;
             }
             card.totalScore = std::clamp(weighted / weight, 0.0, 100.0);
+            int repeated = 0;
+            for (int recentId : context.recentRecipeIds) {
+                if (recentId != recipe.id || repeated == 3) break;
+                ++repeated;
+            }
+            card.totalScore = std::max(0.0, card.totalScore - 3.0 * repeated);
+            if (repeated)
+                card.reasons << QStringLiteral("最近连续做过 %1 次，综合分减少 %2 分")
+                                    .arg(repeated).arg(3 * repeated);
             candidates.push_back(std::move(card));
         }
 
@@ -367,13 +379,20 @@ class RecommendationService final : public IRecommendationService {
                         label += QStringLiteral("；保留另一道符合当前约束的选择");
                 }
             }
+            const QStringList rankingNotes = chosen.reasons;
+            chosen.reasons.clear();
             chosen.reasons << QStringLiteral("%1：%2；预计%3分钟，上限%4分钟")
                                   .arg(label, traits(chosen.recipe))
                                   .arg(chosen.recipe.cookingTimeMinutes)
                                   .arg(p.maxPreparationMinutes);
+            chosen.reasons.last() += p.mood == Mood::Tired
+                ? QStringLiteral("；疲惫时优先省时")
+                : QStringLiteral("；符合时间上限，不额外偏向更快的菜");
             QString inventoryReason = stockReason(chosen);
             if (chosen.expiryUrgencyScore > 0)
                 inventoryReason += QStringLiteral("；可利用临期库存");
+            if (!rankingNotes.isEmpty())
+                inventoryReason += QStringLiteral("；") + rankingNotes.join(QStringLiteral("；"));
             chosen.reasons << inventoryReason;
             selected.insert(chosen.recipeId);
             result.cards.push_back(std::move(chosen));

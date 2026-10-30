@@ -71,3 +71,10 @@ __pycache__/
 /shixu.db*
 /cooking_events.sqlite*
 /meal_records.txt
+/data/
+/profile.json
+/nutrition-goals.json
+/rewards.ini
+/cooking_achievements.json
+# Machine-specific development shortcuts; distributed launcher is generated.
+/启动食序-*.cmd

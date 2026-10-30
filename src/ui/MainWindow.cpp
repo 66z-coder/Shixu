@@ -1,13 +1,23 @@
 #include "ui/MainWindow.h"
 #include "contracts/ActivityContracts.h"
 #include "core/AppClock.h"
+#include "core/PantryStaples.h"
 #include "core/UserProfile.h"
 #include "recognition/PackagingEntryWidget.h"
 #include "ui/AppTheme.h"
+#include "ui/AppIcons.h"
 #include <QComboBox>
+#include <QBuffer>
+#include <QCheckBox>
+#include <QFileDialog>
 #include <QFileInfo>
+#include <QImageReader>
+#include <QInputDialog>
 #include <QLineEdit>
+#include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
+#include <QResizeEvent>
 #include <QPixmap>
 #include <QScrollArea>
 #include <QSet>
@@ -24,6 +34,7 @@
 
 #include <QButtonGroup>
 #include <QFrame>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
@@ -32,6 +43,7 @@
 #include <QWidget>
 
 #include <array>
+#include <algorithm>
 
 #include "contracts/RecommendationContract.h"
 #include "contracts/ServiceFactories.h"
@@ -54,6 +66,75 @@ bool succeeded(const V::OperationResult &r) {
     return r.status == V::OperationStatus::Succeeded || r.status == V::OperationStatus::AlreadyApplied;
 }
 QString text(const std::string &s) { return QString::fromUtf8(s.c_str()); }
+class DoubleClickLabel final : public QLabel {
+  public:
+    using QLabel::QLabel;
+    std::function<void()> onDoubleClick;
+  protected:
+    void mouseDoubleClickEvent(QMouseEvent *event) override {
+        if (event->button() == Qt::LeftButton && onDoubleClick) onDoubleClick();
+        else QLabel::mouseDoubleClickEvent(event);
+    }
+};
+class ExcludedFoodsWidget final : public QWidget {
+  public:
+    explicit ExcludedFoodsWidget(QWidget *parent = nullptr) : QWidget(parent) {
+        setObjectName(QStringLiteral("profileExcluded"));
+        m_grid = new QGridLayout(this);
+        m_grid->setContentsMargins(0, 4, 0, 4);
+        m_grid->setHorizontalSpacing(18);
+        m_grid->setVerticalSpacing(10);
+    }
+    void addFood(const QString &name, bool checked) {
+        auto *box = new QCheckBox(name, this);
+        box->setObjectName(QStringLiteral("profileExcludedOption"));
+        box->setChecked(checked);
+        m_options.append(box);
+        m_grid->addWidget(box, (m_options.size() - 1) / m_columns, (m_options.size() - 1) % m_columns);
+    }
+    QStringList selected() const {
+        QStringList result;
+        for (auto *box : m_options) if (box->isChecked()) result.append(box->text());
+        return result;
+    }
+  protected:
+    void resizeEvent(QResizeEvent *event) override {
+        QWidget::resizeEvent(event);
+        const int columns = qBound(2, event->size().width() / 155, 5);
+        if (columns == m_columns) return;
+        m_columns = columns;
+        for (int i = 0; i < m_options.size(); ++i)
+            m_grid->addWidget(m_options[i], i / m_columns, i % m_columns);
+    }
+  private:
+    QGridLayout *m_grid = nullptr;
+    QVector<QCheckBox *> m_options;
+    int m_columns = 2;
+};
+QPixmap profileAvatar(const UserProfile &profile) {
+    QPixmap output(96, 96);
+    output.fill(Qt::transparent);
+    QPainter p(&output);
+    p.setRenderHint(QPainter::Antialiasing);
+    QPainterPath circle;
+    circle.addEllipse(QRectF(1, 1, 94, 94));
+    QImage image;
+    if (!profile.avatarImage.isEmpty())
+        image.loadFromData(QByteArray::fromBase64(profile.avatarImage.toLatin1()), "PNG");
+    if (!image.isNull()) {
+        p.setClipPath(circle);
+        auto scaled = image.scaled(94, 94, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+        p.drawImage(QPointF(1 - (scaled.width() - 94) / 2.0, 1 - (scaled.height() - 94) / 2.0), scaled);
+    } else {
+        const QStringList colors{"#D9ECF8", "#FBE0DC", "#DDEFE5", "#F4EDD9"};
+        const QStringList names{QStringLiteral("厨"), QStringLiteral("茄"), QStringLiteral("叶"), QStringLiteral("饭")};
+        p.fillPath(circle, QColor(colors[profile.avatar]));
+        p.setPen(QColor("#315970"));
+        QFont font = p.font(); font.setPixelSize(34); p.setFont(font);
+        p.drawText(output.rect(), Qt::AlignCenter, names[profile.avatar]);
+    }
+    return output;
+}
 QDateTime appNow() { return Shixu::appNow(); }
 } // namespace
 struct MainWindow::Services {
@@ -64,12 +145,13 @@ struct MainWindow::Services {
     std::unique_ptr<V::ICookingCompletionService> cooking;
     std::unique_ptr<V::ICookingActivityService> activity;
     std::unique_ptr<UserProfileStore> profile;
-    QLabel *profileSummary = nullptr;
     QWidget *pendingArea = nullptr;
     StatisticsWidget *statistics = nullptr;
     RecommendationWidget *recommendations = nullptr;
     QListWidget *pending = nullptr;
     QLabel *status = nullptr;
+    QListWidget *catalog = nullptr;
+    RecipeDetailsWidget *recipeDetail = nullptr;
     QString date;
     QString migrationError;
 };
@@ -94,7 +176,7 @@ const std::array<PageInfo, static_cast<int>(MainWindow::Page::Count)> kPages{{
      QStringLiteral("推荐功能接入后可在这里使用。")},
     {MainWindow::Page::CheckIn, QStringLiteral("打卡成长"),
      QStringLiteral("每日打卡与成长记录将在这里呈现。")},
-    {MainWindow::Page::Statistics, QStringLiteral("成长统计"),
+    {MainWindow::Page::Statistics, QStringLiteral("我的成长"),
      QStringLiteral("做饭与打卡统计将在这里呈现。")},
     {MainWindow::Page::Profile, QStringLiteral("个人中心"),
      QStringLiteral("个人信息功能接入后可在这里使用。")},
@@ -125,6 +207,8 @@ QWidget *makePlaceholder(const PageInfo &page) {
 MainWindow::MainWindow(QWidget *parent, const QString &rewardFile) : QMainWindow(parent) {
     Shixu::applyTheme();
     setWindowTitle(QStringLiteral("食序"));
+    QApplication::setWindowIcon(QIcon(":/icons/shixu.png"));
+    setWindowIcon(QIcon(":/icons/shixu.png"));
     resize(1280, 800);
     setMinimumSize(980, 620);
 
@@ -145,6 +229,7 @@ MainWindow::MainWindow(QWidget *parent, const QString &rewardFile) : QMainWindow
 
     auto *appName = new QLabel(QStringLiteral("食序"), sidebar);
     appName->setObjectName(QStringLiteral("appName"));
+    auto* brandIcon=new QLabel(sidebar);brandIcon->setPixmap(QPixmap(":/icons/shixu.png").scaled(48,48,Qt::KeepAspectRatio,Qt::SmoothTransformation));sidebarLayout->addWidget(brandIcon);
     sidebarLayout->addWidget(appName);
 
     auto *appCaption = new QLabel(QStringLiteral("让每一餐更有序"), sidebar);
@@ -159,6 +244,11 @@ MainWindow::MainWindow(QWidget *parent, const QString &rewardFile) : QMainWindow
         const int index = static_cast<int>(page.id);
         auto *button = new QPushButton(page.title, sidebar);
         button->setObjectName(QStringLiteral("navButton"));
+        const Shixu::Ui::Icon icons[] = {Shixu::Ui::Icon::Home, Shixu::Ui::Icon::Scan,
+            Shixu::Ui::Icon::Fridge, Shixu::Ui::Icon::Recipes, Shixu::Ui::Icon::Spark,
+            Shixu::Ui::Icon::Growth, Shixu::Ui::Icon::Growth, Shixu::Ui::Icon::Profile};
+        button->setIcon(Shixu::Ui::icon(icons[index]));
+        button->setIconSize(QSize(20, 20));
         button->setCheckable(true);
         button->setCursor(Qt::PointingHandCursor);
         button->setMinimumHeight(44);
@@ -189,21 +279,22 @@ MainWindow::MainWindow(QWidget *parent, const QString &rewardFile) : QMainWindow
     shell->addWidget(m_content, 1);
 
     setStyleSheet(QStringLiteral(R"(
-        QWidget#appRoot { background: #EAF5F8; color: #24465B; }
+        QWidget#appRoot { background: #EDF7F9; color: #28485D; }
         QFrame#sidebar { background: #FCFDFB; border-right: 1px solid #DDEBF0; }
         QLabel#appName { color: #17416B; font-size: 29px; font-weight: 700; }
         QLabel#appCaption { color: #7793A2; font-size: 12px; }
         QPushButton#navButton {
-            background: transparent; border: 0; border-radius: 11px;
-            color: #38586C; font-size: 14px; text-align: left; padding: 0 15px;
+            background: transparent; border: 0; border-radius: 10px;
+            color: #38586C; font-size: 14px; text-align: left; padding: 0 12px; min-height:44px;
         }
         QPushButton#navButton:hover { background: #EFF7FA; }
+        QPushButton#navButton:focus { border:1px solid #7CB5D6; }
         QPushButton#navButton:checked {
             background: #DCEEF8; color: #1B6297; font-weight: 700;
         }
         QLabel#pageTitle { color: #244E6A; font-size: 24px; font-weight: 700; }
         QStackedWidget#pageStack {
-            background: #FFFFFF; border: 1px solid #E1EDF0; border-radius: 16px;
+            background: transparent; border:0;
         }
         QLabel#placeholderTitle { color: #31566D; font-size: 22px; font-weight: 600; }
         QLabel#placeholderDescription { color: #7893A0; font-size: 14px; }
@@ -226,6 +317,16 @@ MainWindow::MainWindow(QWidget *parent, const QString &rewardFile) : QMainWindow
             });
     m_home = new HomeWidget(rewards, m_pages);
     m_inventoryPage = new InventoryWidget(m_pages);
+    m_inventoryPage->setUpdateHandler([this](FoodCandidate food, QString *error) {
+        RecognitionService normalizer;
+        food.name = normalizer.normalizeFoodName(food.name);
+        food.unit = normalizer.normalizeUnit(food.unit);
+        if (!m_inventory->updateFood(food, error)) return false;
+        refreshInventory();
+        if (m_services && m_services->recommendations)
+            m_services->recommendations->requestRecommendations();
+        return true;
+    });
     setPage(Page::Home, m_home);
     setPage(Page::Inventory, m_inventoryPage);
     connect(m_home, &HomeWidget::foodEntryRequested, this, [this] { showPage(Page::FoodEntry); });
@@ -235,7 +336,7 @@ MainWindow::MainWindow(QWidget *parent, const QString &rewardFile) : QMainWindow
     auto *recommendations = new RecommendationWidget(m_pages);
     setPage(Page::Recommendations, recommendations);
     initializeV1(rewards, recommendations);
-    setPage(Page::CheckIn, new CheckInWidget(rewards, m_pages));
+    m_navigationButtons.at(static_cast<int>(Page::CheckIn))->hide();
     m_services->statistics = new StatisticsWidget(rewards, m_pages, m_services->activity.get());
     setPage(Page::Statistics, m_services->statistics);
     showPage(Page::Home);
@@ -271,52 +372,75 @@ void MainWindow::initializeV1(RewardSystem *rewards, RecommendationWidget *recom
         QFileInfo(rewards->storageFilePath()).dir().filePath("profile.json"));
     recommendations->setDefaultInventoryPolicy(s.profile->value.policy);
     auto *profilePage = new QScrollArea(m_pages);
+    profilePage->setObjectName("profileScroll");
+    profilePage->setProperty("pageScroll", true);
+    profilePage->setFrameShape(QFrame::NoFrame);
     profilePage->setWidgetResizable(true);
+    profilePage->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     auto *profileBody = new QWidget(profilePage);
-    profileBody->setObjectName("pageBody");
+    profileBody->setObjectName("profileBody");
     profilePage->setWidget(profileBody);
     auto *profileLayout = new QVBoxLayout(profileBody);
-    profileLayout->setContentsMargins(24, 24, 24, 24);
+    profileLayout->setContentsMargins(0, 0, 0, 0);
     profileLayout->setSpacing(16);
-    profileLayout->addWidget(new QLabel(QStringLiteral("我的厨房 · 个人资料与偏好"), profileBody));
-    auto *nickname = new QLineEdit(s.profile->value.nickname, profileBody);
+    profileBody->setStyleSheet(QStringLiteral(R"(
+        QWidget#profileBody { background:#EDF7F9; }
+        QFrame#profileCard { background:white; border:1px solid #DCE8EF; border-radius:14px; }
+        QLabel#profileHeading { color:#244E6A; font-size:18px; font-weight:700; }
+        QLabel#profileCaption { color:#627E90; font-size:12px; }
+        QLabel#profileNickname { color:#244E6A; font-size:23px; font-weight:700; }
+        QLabel#profileStatus { color:#527992; }
+        QCheckBox#profileExcludedOption { background:transparent; padding:3px 0; spacing:7px; }
+    )"));
+    auto makeProfileCard = [&](const QString &title) {
+        auto *frame = new QFrame(profileBody);
+        frame->setObjectName(QStringLiteral("profileCard"));
+        auto *box = new QVBoxLayout(frame);
+        box->setContentsMargins(20, 20, 20, 20);
+        box->setSpacing(10);
+        auto *heading = new QLabel(title, frame);
+        heading->setObjectName(QStringLiteral("profileHeading"));
+        box->addWidget(heading);
+        profileLayout->addWidget(frame);
+        return box;
+    };
+    auto *detailsLayout = makeProfileCard(QStringLiteral("个人资料"));
+    auto *profileRow = new QHBoxLayout;
+    profileRow->setSpacing(20);
+    auto *avatar = new DoubleClickLabel(profileBody);
+    avatar->setObjectName("profileAvatar");
+    avatar->setFixedSize(96, 96);
+    avatar->setCursor(Qt::PointingHandCursor);
+    avatar->setToolTip(QStringLiteral("双击选择头像图片"));
+    avatar->setPixmap(profileAvatar(s.profile->value));
+    profileRow->addWidget(avatar);
+    auto *identity = new QVBoxLayout;
+    identity->setSpacing(6);
+    identity->addStretch();
+    auto *nickname = new DoubleClickLabel(s.profile->value.nickname, profileBody);
     nickname->setObjectName("profileNickname");
-    nickname->setMaxLength(30);
-    profileLayout->addWidget(new QLabel(QStringLiteral("昵称"), profileBody));
-    profileLayout->addWidget(nickname);
-    auto *avatar = new QComboBox(profileBody);
-    avatar->addItems(
-        {QStringLiteral("小厨师"), QStringLiteral("番茄"), QStringLiteral("青叶"), QStringLiteral("饭团")});
-    for (int i = 0; i < 4; ++i) {
-        QPixmap icon(40, 40);
-        icon.fill(Qt::transparent);
-        QPainter painter(&icon);
-        painter.setRenderHint(QPainter::Antialiasing);
-        painter.setBrush(QColor(i == 0 ? "#D9ECF8" : i == 1 ? "#FBE0DC" : i == 2 ? "#DDEFE5" : "#F4EDD9"));
-        painter.setPen(Qt::NoPen);
-        painter.drawEllipse(1, 1, 38, 38);
-        painter.setPen(QColor("#315970"));
-        painter.drawText(icon.rect(), Qt::AlignCenter,
-                         QStringList{QStringLiteral("厨"), QStringLiteral("茄"), QStringLiteral("叶"),
-                                     QStringLiteral("饭")}[i]);
-        painter.end();
-        avatar->setItemIcon(i, QIcon(icon));
-    }
-    avatar->setIconSize(QSize(32, 32));
-    avatar->setCurrentIndex(s.profile->value.avatar);
-    profileLayout->addWidget(new QLabel(QStringLiteral("头像"), profileBody));
-    profileLayout->addWidget(avatar);
+    nickname->setCursor(Qt::PointingHandCursor);
+    nickname->setToolTip(QStringLiteral("双击修改昵称"));
+    identity->addWidget(nickname);
+    auto *identityHint = new QLabel(QStringLiteral("双击头像或昵称修改"), profileBody);
+    identityHint->setObjectName("profileCaption");
+    identity->addWidget(identityHint);
+    identity->addStretch();
+    profileRow->addLayout(identity, 1);
+    detailsLayout->addLayout(profileRow);
+    auto *preferencesLayout = makeProfileCard(QStringLiteral("饮食偏好"));
     auto *policy = new QComboBox(profileBody);
     policy->addItems(
-        {QStringLiteral("优先现有，允许补购"), QStringLiteral("只用现有食材"), QStringLiteral("少量补购")});
+        {QStringLiteral("优先现有，允许补购"), QStringLiteral("只用现有食材")});
     policy->setCurrentIndex(int(s.profile->value.policy));
-    profileLayout->addWidget(new QLabel(QStringLiteral("默认库存策略"), profileBody));
-    profileLayout->addWidget(policy);
-    profileLayout->addWidget(
-        new QLabel(QStringLiteral("避开食材 · 勾选后不再推荐含这些食材的菜谱"), profileBody));
-    auto *excluded = new QListWidget(profileBody);
-    excluded->setObjectName("profileExcluded");
-    excluded->setMaximumHeight(220);
+    preferencesLayout->addWidget(new QLabel(QStringLiteral("默认库存策略"), profileBody));
+    preferencesLayout->addWidget(policy);
+    preferencesLayout->addWidget(new QLabel(QStringLiteral("避开食材"), profileBody));
+    auto *excludedCaption = new QLabel(QStringLiteral("勾选后，推荐中会排除含同名食材的菜谱。"), profileBody);
+    excludedCaption->setObjectName(QStringLiteral("profileCaption"));
+    excludedCaption->setWordWrap(true);
+    preferencesLayout->addWidget(excludedCaption);
+    auto *excluded = new ExcludedFoodsWidget(profileBody);
     QSet<QString> names;
     const auto recipeQuery = s.recipes->getAllRecipes();
     for (const auto &recipe : recipeQuery.value)
@@ -326,23 +450,59 @@ void MainWindow::initializeV1(RewardSystem *rewards, RecommendationWidget *recom
         names.insert(name);
     auto sorted = names.values();
     sorted.sort();
-    for (const auto &name : sorted) {
-        auto *item = new QListWidgetItem(name, excluded);
-        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-        item->setCheckState(s.profile->value.excluded.contains(name) ? Qt::Checked : Qt::Unchecked);
-    }
-    profileLayout->addWidget(excluded);
+    for (const auto &name : sorted)
+        excluded->addFood(name, s.profile->value.excluded.contains(name));
+    preferencesLayout->addWidget(excluded);
     auto *profileStatus = new QLabel(s.profile->error, profileBody);
+    profileStatus->setObjectName(QStringLiteral("profileStatus"));
     profileStatus->setWordWrap(true);
-    profileLayout->addWidget(profileStatus);
-    auto *saveProfile = new QPushButton(QStringLiteral("保存资料与偏好"), profileBody);
+    preferencesLayout->addWidget(profileStatus);
+    nickname->onDoubleClick = [this, nickname] {
+        bool accepted = false;
+        const QString name = QInputDialog::getText(this, QStringLiteral("修改昵称"), QStringLiteral("昵称（最多 30 字）"),
+                                                  QLineEdit::Normal, m_services->profile->value.nickname, &accepted);
+        if (!accepted) return;
+        auto next = m_services->profile->value;
+        next.nickname = name;
+        if (!m_services->profile->save(next)) {
+            QMessageBox::warning(this, QStringLiteral("无法保存昵称"), QStringLiteral("请检查昵称和资料文件，原昵称已保留。"));
+            return;
+        }
+        nickname->setText(m_services->profile->value.nickname);
+    };
+    avatar->onDoubleClick = [this, avatar] {
+        const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("选择头像"), {},
+            QStringLiteral("图片 (*.png *.jpg *.jpeg *.bmp *.webp)"));
+        if (path.isEmpty()) return;
+        QImageReader reader(path);
+        reader.setAutoTransform(true);
+        const QSize size = reader.size();
+        if (QFileInfo(path).size() > 10 * 1024 * 1024 || !size.isValid() ||
+            qint64(size.width()) * size.height() > 40000000) {
+            QMessageBox::warning(this, QStringLiteral("无法导入头像"), QStringLiteral("请选择不超过 10 MB 且尺寸适中的图片。"));
+            return;
+        }
+        reader.setScaledSize(size.scaled(256, 256, Qt::KeepAspectRatio));
+        const QImage image = reader.read();
+        QByteArray bytes;
+        QBuffer buffer(&bytes);
+        if (image.isNull() || !buffer.open(QIODevice::WriteOnly) || !image.save(&buffer, "PNG")) {
+            QMessageBox::warning(this, QStringLiteral("无法导入头像"), QStringLiteral("无法读取图片，请选择其他图片。"));
+            return;
+        }
+        auto next = m_services->profile->value;
+        next.avatarImage = QString::fromLatin1(bytes.toBase64());
+        if (!m_services->profile->save(next)) {
+            QMessageBox::warning(this, QStringLiteral("无法保存头像"), QStringLiteral("资料文件无法保存，原头像已保留。"));
+            return;
+        }
+        avatar->setPixmap(profileAvatar(m_services->profile->value));
+    };
+    auto *saveProfile = new QPushButton(QStringLiteral("保存饮食偏好"), profileBody);
     saveProfile->setObjectName("saveProfile");
     saveProfile->setProperty("primary", true);
     saveProfile->setEnabled(s.profile->error.isEmpty() && succeeded(recipeQuery.outcome));
-    profileLayout->addWidget(saveProfile);
-    s.profileSummary = new QLabel(profileBody);
-    s.profileSummary->setWordWrap(true);
-    profileLayout->addWidget(s.profileSummary);
+    preferencesLayout->addWidget(saveProfile, 0, Qt::AlignLeft);
     profileLayout->addStretch();
     setPage(Page::Profile, profilePage);
     s.profile->changed = [this, recommendations] {
@@ -351,14 +511,10 @@ void MainWindow::initializeV1(RewardSystem *rewards, RecommendationWidget *recom
         recommendations->requestRecommendations();
     };
     connect(saveProfile, &QPushButton::clicked, this,
-            [this, nickname, avatar, policy, excluded, profileStatus] {
-                UserProfile next;
-                next.nickname = nickname->text();
-                next.avatar = avatar->currentIndex();
+            [this, policy, excluded, profileStatus] {
+                UserProfile next = m_services->profile->value;
+                next.excluded = excluded->selected();
                 next.policy = static_cast<V::InventoryPolicy>(policy->currentIndex());
-                for (int i = 0; i < excluded->count(); ++i)
-                    if (excluded->item(i)->checkState() == Qt::Checked)
-                        next.excluded.append(excluded->item(i)->text());
                 profileStatus->setText(
                     m_services->profile->save(next)
                         ? QStringLiteral("已保存，下次打开仍会保留。推荐已更新。")
@@ -403,50 +559,98 @@ void MainWindow::initializeV1(RewardSystem *rewards, RecommendationWidget *recom
                     context.preferences = preferences;
                     context.excludedIngredients = m_services->profile->value.excluded;
                     context.inventorySnapshot = inventory.value;
+                    const auto activity = m_services->activity->refresh(preferences.referenceDate);
+                    if (succeeded(activity.outcome)) {
+                        const QDate earliest = appNow().date().addDays(-2);
+                        for (const auto &meal : activity.value.recentMeals) {
+                            const QDate date = QDate::fromString(text(meal.date), Qt::ISODate);
+                            if (!date.isValid() || date > appNow().date()) continue;
+                            if (date < earliest) break;
+                            context.recentRecipeIds.push_back(meal.recipeId);
+                            if (context.recentRecipeIds.size() == 3) break;
+                        }
+                    }
                     result = m_services->recommendation->recommend(context);
                 }
                 recommendations->setRecommendationResult(result);
             });
-    connect(recommendations, &RecommendationWidget::recipeSelected, this, &MainWindow::openRecipe);
-    connect(recommendations, &RecommendationWidget::recipeStepsSelected, this, [this](int id) {
-        m_showRecipeSteps = true;
-        openRecipe(id);
-        m_showRecipeSteps = false;
-    });
+    auto openRecommendedRecipe = [this, recommendations](int id) {
+        if (loadRecipeDetails(recommendations->recipeDetails(), id))
+            recommendations->showRecipeDetails();
+    };
+    connect(recommendations, &RecommendationWidget::recipeSelected, this, openRecommendedRecipe);
+    connect(recommendations, &RecommendationWidget::recipeStepsSelected, this, openRecommendedRecipe);
+    connect(recommendations->recipeDetails(), &RecipeDetailsWidget::cookingRequested, this,
+            [this, recommendations](int id) {
+                openCooking(id);
+                loadRecipeDetails(recommendations->recipeDetails(), id);
+            });
     auto *page = new QWidget(m_pages);
     auto *layout = new QVBoxLayout(page);
-    s.status = new QLabel(page);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(16);
+    s.pendingArea = new QWidget(page);
+    auto *pendingLayout = new QVBoxLayout(s.pendingArea);
+    pendingLayout->setContentsMargins(0, 0, 0, 0);
+    s.status = new QLabel(s.pendingArea);
     s.status->setWordWrap(true);
-    layout->addWidget(s.status);
-    s.pending = new QListWidget(page);
+    pendingLayout->addWidget(s.status);
+    s.pending = new QListWidget(s.pendingArea);
     s.pending->setObjectName("pendingCookingEvents");
-    layout->addWidget(s.pending);
-    auto *resume = new QPushButton(QStringLiteral("打开选中的待处理记录"), page);
-    layout->addWidget(resume);
+    s.pending->setMaximumHeight(150);
+    pendingLayout->addWidget(s.pending);
+    auto *resume = new QPushButton(QStringLiteral("打开选中的待处理记录"), s.pendingArea);
+    pendingLayout->addWidget(resume);
+    layout->addWidget(s.pendingArea);
     connect(resume, &QPushButton::clicked, this, [this] {
         if (auto *item = m_services->pending->currentItem())
             openCooking(0, item->data(Qt::UserRole).toString());
     });
+    layout->addWidget(new QLabel(QStringLiteral("挑选今天想吃的菜，查看营养与做法"), page));
+    auto *columns = new QHBoxLayout;
+    columns->setSpacing(16);
+    auto *left = new QVBoxLayout;
+    left->setContentsMargins(0, 0, 0, 0);
+    left->addWidget(new QLabel(QStringLiteral("选择菜谱"), page));
     auto *recipes = new QListWidget(page);
     recipes->setObjectName("recipeCatalog");
-    layout->addWidget(recipes, 2);
+    recipes->setIconSize(QSize(24, 24));
+    recipes->setWordWrap(true);
+    recipes->setTextElideMode(Qt::ElideNone);
+    recipes->setResizeMode(QListView::Adjust);
+    recipes->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    s.catalog = recipes;
+    left->addWidget(recipes, 1);
+    auto *listPanel = new QWidget(page);
+    listPanel->setLayout(left);
+    listPanel->setMinimumWidth(248);
+    listPanel->setMaximumWidth(340);
+    columns->addWidget(listPanel, 1);
+    s.recipeDetail = new RecipeDetailsWidget(page);
+    s.recipeDetail->setObjectName("recipeInlineDetail");
+    columns->addWidget(s.recipeDetail, 3);
+    layout->addLayout(columns, 1);
     const auto all = s.recipes->getAllRecipes();
     if (succeeded(all.outcome))
         for (const auto &recipe : all.value) {
             auto *item = new QListWidgetItem(
-                QStringLiteral("%1 · %2 分钟").arg(text(recipe.name)).arg(recipe.cookingTimeMinutes),
+                QStringLiteral("%1\n%2 分钟 · 约 %3 千卡").arg(text(recipe.name)).arg(recipe.cookingTimeMinutes)
+                    .arg(calculateNutrition(recipe, 1).calories, 0, 'f', 0),
                 recipes);
+            item->setIcon(Shixu::Ui::icon(Shixu::Ui::foodIcon(text(recipe.category))));
+            item->setToolTip(item->text());
             item->setData(Qt::UserRole, recipe.id);
         }
-    auto *details = new QPushButton(QStringLiteral("查看选中菜谱"), page);
-    layout->addWidget(details);
-    connect(details, &QPushButton::clicked, this, [this, recipes] {
-        if (auto *item = recipes->currentItem())
-            openRecipe(item->data(Qt::UserRole).toInt());
+    connect(recipes, &QListWidget::currentItemChanged, this, [this](QListWidgetItem *item) {
+        if (item) loadRecipeDetails(m_services->recipeDetail, item->data(Qt::UserRole).toInt());
     });
-    connect(recipes, &QListWidget::itemDoubleClicked, this,
-            [this](QListWidgetItem *item) { openRecipe(item->data(Qt::UserRole).toInt()); });
+    connect(s.recipeDetail, &RecipeDetailsWidget::cookingRequested, this, [this](int id) {
+        openCooking(id);
+        if (m_services->catalog->currentItem())
+            loadRecipeDetails(m_services->recipeDetail, m_services->catalog->currentItem()->data(Qt::UserRole).toInt());
+    });
     setPage(Page::Recipes, page);
+    if (recipes->count()) recipes->setCurrentRow(0);
     auto *timer = new QTimer(this);
     timer->setInterval(30000);
     connect(timer, &QTimer::timeout, this, [this] {
@@ -466,6 +670,7 @@ void MainWindow::refreshPending() {
         return;
     auto pending = m_services->cooking->getPendingCompletions();
     m_services->pending->clear();
+    m_services->pendingArea->setVisible(!succeeded(pending.outcome) || !pending.value.empty());
     auto *nav = m_navigationButtons.at(static_cast<int>(Page::Recipes));
     nav->setText(succeeded(pending.outcome)
                      ? (pending.value.empty() ? QStringLiteral("菜谱与营养")
@@ -490,14 +695,15 @@ void MainWindow::refreshPending() {
     }
 }
 
-void MainWindow::openRecipe(int recipeId) {
+bool MainWindow::loadRecipeDetails(RecipeDetailsWidget *widget, int recipeId) {
+    widget->clearRecipe();
     auto recipe = m_services->recipes->findRecipeById(recipeId);
     auto stock = m_services->inventory->getInventoryBatches();
     if (!succeeded(recipe.outcome) || !succeeded(stock.outcome)) {
         QMessageBox::warning(
             this, QStringLiteral("无法加载菜谱"),
             text(!succeeded(recipe.outcome) ? recipe.outcome.message : stock.outcome.message));
-        return;
+        return false;
     }
     V::EvaluationRequest request;
     request.inventory = stock.value;
@@ -507,15 +713,21 @@ void MainWindow::openRecipe(int recipeId) {
     auto available = m_services->inventory->evaluateRequirements(request);
     if (!succeeded(available.outcome)) {
         QMessageBox::warning(this, QStringLiteral("库存读取失败"), text(available.outcome.message));
-        return;
+        return false;
     }
+    widget->setRecipe(recipe.value, calculateNutrition(recipe.value, 1), available.value);
+    return true;
+}
+
+void MainWindow::openRecipe(int recipeId) {
     QDialog dialog(this);
     dialog.setWindowTitle(QStringLiteral("菜谱详情"));
     dialog.resize(700, 650);
     auto *layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(0, 0, 0, 0);
     auto *widget = new RecipeDetailsWidget(&dialog);
     layout->addWidget(widget);
-    widget->setRecipe(recipe.value, calculateNutrition(recipe.value, 1), available.value);
+    if (!loadRecipeDetails(widget, recipeId)) return;
     if (m_showRecipeSteps)
         QTimer::singleShot(0, widget, [widget] { widget->showSteps(); });
     bool cooking = false;
@@ -548,13 +760,29 @@ void MainWindow::openCooking(int recipeId, const QString &eventId) {
         request.recipeId = recipeId;
         request.servings = 1;
         request.completedAt = appNow().toString("yyyy-MM-dd HH:mm:ss").toStdString();
+        const auto recipe = m_services->recipes->findRecipeById(recipeId);
+        if (!succeeded(recipe.outcome)) {
+            QMessageBox::warning(this, QStringLiteral("无法加载菜谱"), text(recipe.outcome.message));
+            return;
+        }
+        RecognitionService normalizer;
+        for (const auto &ingredient : recipe.value.ingredients) {
+            const auto name = normalizer.normalizeFoodName(text(ingredient.foodName)).toUtf8().toStdString();
+            if (ingredient.amountGrams > 0 && Shixu::isPantryStaple(name) &&
+                std::find(request.externallyPreparedFoods.begin(), request.externallyPreparedFoods.end(), name) == request.externallyPreparedFoods.end())
+                request.externallyPreparedFoods.push_back(name);
+        }
     }
     QDialog dialog(this);
     dialog.setWindowTitle(QStringLiteral("做饭确认与恢复"));
-    dialog.resize(750, 650);
+    dialog.setObjectName(QStringLiteral("cookingConfirmationDialog"));
+    dialog.setStyleSheet(QStringLiteral("QDialog#cookingConfirmationDialog { background: #EDF7F9; }"));
+    dialog.resize(680, 480);
     auto *layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(0, 0, 0, 0);
     auto *widget = new CookingConfirmationWidget(&dialog);
     layout->addWidget(widget);
+    connect(widget, &CookingConfirmationWidget::closeRequested, &dialog, &QDialog::accept);
     auto preview = [&](const V::CookingCompletionRequest &r) {
         widget->setBusy(true);
         auto p = m_services->cooking->previewCompletion(r);
@@ -592,18 +820,20 @@ void MainWindow::openCooking(int recipeId, const QString &eventId) {
         widget->setBusy(true);
         progress(m_services->cooking->cancelPreparedCompletion(id.toStdString()));
     });
-    if (eventId.isEmpty())
-        preview(request);
-    else {
+    if (eventId.isEmpty()) {
+        const auto first = m_services->cooking->previewCompletion(request);
+        widget->setPreview(first);
+        if (first.outcome.status == V::OperationStatus::Succeeded && !first.confirmationToken.empty()) {
+            widget->setBusy(true);
+            progress(m_services->cooking->completeCooking(request, first.confirmationToken));
+        }
+    } else {
         V::CookingCompletionPreview display;
         display.snapshot = stored.snapshot;
         display.outcome = stored.progress.outcome;
         widget->setPreview(display);
         widget->setProgress(stored.progress);
     }
-    auto *close = new QPushButton(QStringLiteral("关闭（未完成记录会保留）"), &dialog);
-    layout->addWidget(close);
-    connect(close, &QPushButton::clicked, &dialog, &QDialog::accept);
     dialog.exec();
     refreshPending();
 }
@@ -647,19 +877,7 @@ void MainWindow::setPage(Page page, QWidget *widget) {
 }
 
 void MainWindow::showPage(Page page) {
-    if (page == Page::Profile && m_services && m_services->profileSummary) {
-        auto growth =
-            m_services->rewards->getGrowthSnapshot(appNow().date().toString(Qt::ISODate).toStdString());
-        auto activity = m_services->activity->refresh(appNow().date().toString(Qt::ISODate).toStdString());
-        m_services->profileSummary->setText(
-            succeeded(growth.outcome) && succeeded(activity.outcome)
-                ? QStringLiteral("我的成长\n累计打卡 %1 天 · 积分 %2\n完成做饭 %3 次 · 已解锁成就 %4")
-                      .arg(growth.value.totalCheckIns)
-                      .arg(growth.value.totalPoints)
-                      .arg(activity.value.totalCookingCount)
-                      .arg(growth.value.unlockedAchievements.size() + activity.value.achievements.size())
-                : QStringLiteral("成长数据暂不可用，请在成长统计页查看原因。"));
-    }
+    if(page==Page::CheckIn)page=Page::Statistics;
     if (page == Page::Statistics && m_services && m_services->statistics)
         m_services->statistics->refresh();
     const int index = static_cast<int>(page);
@@ -676,12 +894,18 @@ void MainWindow::showPage(Page page) {
     m_pageTitle->setText(kPages.at(index).title);
     const bool home = page == Page::Home;
     m_pageTitle->setVisible(!home);
-    m_content->layout()->setContentsMargins(home ? 0 : 32, home ? 0 : 30, home ? 0 : 32, home ? 0 : 30);
-    m_content->layout()->setSpacing(home ? 0 : 22);
+    const int margin = width() < 1100 ? 24 : 32;
+    m_content->layout()->setContentsMargins(home ? 0 : margin, home ? 0 : 24, home ? 0 : margin, home ? 0 : 24);
+    m_content->layout()->setSpacing(home ? 0 : 16);
     m_content->setStyleSheet(QStringLiteral("QFrame#content { background: #EDF7F9; }"));
-    m_pages->setStyleSheet(home
-                               ? QStringLiteral("QStackedWidget#pageStack { background: "
-                                                "transparent; border: 0; }")
-                               : QStringLiteral("QStackedWidget#pageStack { background: #FFFFFF; border: 1px "
-                                                "solid #E1EDF0; border-radius: 16px; }"));
+    m_pages->setStyleSheet(QStringLiteral("QStackedWidget#pageStack { background:transparent; border:0; }"));
+}
+
+void MainWindow::resizeEvent(QResizeEvent *event) {
+    QMainWindow::resizeEvent(event);
+    if (!m_content || !m_pages) return;
+    const bool home = m_pages->currentIndex() == int(Page::Home);
+    const int margin = width() < 1100 ? 24 : 32;
+    m_content->layout()->setContentsMargins(home ? 0 : margin, home ? 0 : 24,
+                                           home ? 0 : margin, home ? 0 : 24);
 }

@@ -1,3 +1,3 @@
 <RCC><qresource prefix="/recognition">
 <file alias="normalization.json">recognition/normalization.json</file>
-</qresource></RCC>
+</qresource><qresource prefix="/icons"><file alias="chevron-down.png">icons/chevron-down.png</file><file alias="chevron-up.png">icons/chevron-up.png</file><file alias="check.png">icons/check.png</file><file alias="cooking_streak_3.png">icons/cooking_streak_3.png</file><file alias="expiring_3.png">icons/expiring_3.png</file><file alias="first_cooking.png">icons/first_cooking.png</file><file alias="recipes_5.png">icons/recipes_5.png</file><file alias="shixu.png">icons/shixu.png</file></qresource></RCC>

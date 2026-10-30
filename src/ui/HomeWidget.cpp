@@ -221,14 +221,14 @@ HomeWidget::HomeWidget(RewardSystem* rewards, QWidget* parent)
 {
     setObjectName(QStringLiteral("homeWidget"));
     auto* root = new QHBoxLayout(this);
-    root->setContentsMargins(20, 16, 20, 16);
-    root->setSpacing(12);
+    root->setContentsMargins(32, 24, 32, 24);
+    root->setSpacing(16);
 
     auto* hero = new QVBoxLayout;
     hero->setSpacing(3);
     m_fridge = new FridgeCanvas(this);
     hero->addWidget(m_fridge, 1);
-    auto* tip = new QLabel(QStringLiteral("轻点冰箱门，看看里面有什么  ·  再点一次关门"), this);
+    auto* tip = new QLabel(QStringLiteral("点击冰箱门查看食材"), this);
     tip->setObjectName(QStringLiteral("homeTip"));
     tip->setAlignment(Qt::AlignCenter);
     hero->addWidget(tip);
@@ -236,13 +236,20 @@ HomeWidget::HomeWidget(RewardSystem* rewards, QWidget* parent)
 
     auto* right = new QVBoxLayout;
     right->setSpacing(8);
-    auto* title = new QLabel(QStringLiteral("打开冰箱，\n看看今天有什么"), this);
+    auto* title = new QLabel(QStringLiteral("今天的冰箱"), this);
     title->setObjectName(QStringLiteral("homeTitle"));
     right->addWidget(title);
-    auto* subtitle = new QLabel(QStringLiteral("记录食材  ·  合理规划  ·  减少浪费"), this);
+    auto* subtitle = new QLabel(QStringLiteral("先看看食材，再安排今天吃什么"), this);
     subtitle->setObjectName(QStringLiteral("homeSubtitle"));
     right->addWidget(subtitle);
     right->addSpacing(8);
+
+    auto* foodEntryButton = new QPushButton(QStringLiteral("＋  录入食材"), this);
+    foodEntryButton->setObjectName(QStringLiteral("homeAction"));
+    foodEntryButton->setProperty("primary", true);
+    foodEntryButton->setMinimumHeight(46);
+    right->addWidget(foodEntryButton);
+    connect(foodEntryButton, &QPushButton::clicked, this, &HomeWidget::foodEntryRequested);
 
     auto* sideScroll = new QScrollArea(this);
     sideScroll->setObjectName(QStringLiteral("homeSideScroll"));
@@ -255,11 +262,11 @@ HomeWidget::HomeWidget(RewardSystem* rewards, QWidget* parent)
     side->setMaximumWidth(326);
     auto* sideLayout = new QVBoxLayout(side);
     sideLayout->setContentsMargins(0, 0, 0, 0);
-    sideLayout->setSpacing(10);
+    sideLayout->setSpacing(16);
     sideScroll->setWidget(side);
 
     QVBoxLayout* moodLayout;
-    sideLayout->addWidget(card(side, QStringLiteral("今天的心情"), moodLayout));
+    auto* moodCard = card(side, QStringLiteral("今天吃什么"), moodLayout);
     auto* moodDescription = new QLabel(
         QStringLiteral("选一个状态，看看今天适合做什么。"), side);
     moodDescription->setObjectName(QStringLiteral("homeBody"));
@@ -269,17 +276,17 @@ HomeWidget::HomeWidget(RewardSystem* rewards, QWidget* parent)
     m_moodButtons = new QButtonGroup(this);
     m_moodButtons->setExclusive(true);
     using V1Mood = Shixu::Contracts::V1::Mood;
-    const struct { V1Mood mood; const char* label; int minutes; } moods[] = {
-        {V1Mood::Tired, "很累", 30},
-        {V1Mood::WantGoodFood, "想吃点好的", 45},
-        {V1Mood::LowAppetite, "没胃口", 30},
-        {V1Mood::WantLight, "想清爽一点", 40},
-        {V1Mood::TreatMyself, "想犒劳自己", 75},
+    const struct { V1Mood mood; const char* label; const char* emoji; int minutes; } moods[] = {
+        {V1Mood::Tired, "很累", "😴", 30},
+        {V1Mood::WantGoodFood, "想吃点好的", "😋", 45},
+        {V1Mood::LowAppetite, "没胃口", "😕", 30},
+        {V1Mood::WantLight, "想清爽一点", "🌿", 40},
+        {V1Mood::TreatMyself, "想犒劳自己", "🥳", 75},
     };
     for (const auto& choice : moods) {
         auto* button = new QPushButton(
-            QStringLiteral("%1　·　默认 %2 分钟")
-                .arg(QString::fromUtf8(choice.label)).arg(choice.minutes), side);
+            QStringLiteral("%1  %2　·　默认 %3 分钟")
+                .arg(QString::fromUtf8(choice.emoji), QString::fromUtf8(choice.label)).arg(choice.minutes), side);
         button->setObjectName(QStringLiteral("homeMoodChoice"));
         button->setCheckable(true);
         button->setCursor(Qt::PointingHandCursor);
@@ -301,7 +308,8 @@ HomeWidget::HomeWidget(RewardSystem* rewards, QWidget* parent)
     auto* moodAction = new QPushButton(QStringLiteral("看看今天吃什么  →"), side);
     moodAction->setObjectName(QStringLiteral("homeMoodAction"));
     moodAction->setCursor(Qt::PointingHandCursor);
-    moodAction->setMinimumHeight(42);
+    moodAction->setProperty("primary", true);
+    moodAction->setMinimumHeight(44);
     moodLayout->addWidget(moodAction);
     connect(moodAction, &QPushButton::clicked, this, [this] {
         const int selected = m_moodButtons->checkedId();
@@ -358,12 +366,7 @@ HomeWidget::HomeWidget(RewardSystem* rewards, QWidget* parent)
     checkInLayout->addWidget(checkInButton);
     connect(checkInButton, &QPushButton::clicked, this, &HomeWidget::checkInRequested);
     sideLayout->addLayout(statusRow);
-
-    auto* foodEntryButton = new QPushButton(QStringLiteral("＋  录入食材"), side);
-    foodEntryButton->setObjectName(QStringLiteral("homeAction"));
-    foodEntryButton->setMinimumHeight(46);
-    sideLayout->addWidget(foodEntryButton);
-    connect(foodEntryButton, &QPushButton::clicked, this, &HomeWidget::foodEntryRequested);
+    sideLayout->addWidget(moodCard);
     auto* recipesButton = new QPushButton(QStringLiteral("看看菜谱  →"), side);
     recipesButton->setObjectName(QStringLiteral("homeLink"));
     sideLayout->addWidget(recipesButton);
@@ -376,37 +379,21 @@ HomeWidget::HomeWidget(RewardSystem* rewards, QWidget* parent)
         QWidget#homeWidget, QWidget#homeSide, QScrollArea#homeSideScroll {
             background: transparent; color: #173956;
         }
-        QLabel#homeTitle { color: #143B67; font-size: 27px; font-weight: 700; }
-        QLabel#homeSubtitle, QLabel#homeTip { color: #66849A; font-size: 12px; }
-        QFrame#homeCard { background: rgba(255, 255, 255, 237); border: 1px solid #E2EDF0; border-radius: 18px; }
-        QLabel#homeCardTitle { color: #18446E; font-size: 16px; font-weight: 700; }
+        QScrollArea#homeSideScroll > QWidget#qt_scrollarea_viewport { background: transparent; border: 0; }
+        QLabel#homeTitle { color: #143B67; font-size: 24px; font-weight: 700; }
+        QLabel#homeSubtitle, QLabel#homeTip { color: #617B8C; font-size: 12px; }
+        QFrame#homeCard { background: rgba(255, 255, 255, 237); border: 1px solid #E2EDF0; border-radius: 14px; }
+        QLabel#homeCardTitle { color: #18446E; font-size: 18px; font-weight: 700; }
         QLabel#homeMetric { color: #2475AA; font-size: 22px; font-weight: 700; }
         QLabel#homeSmallMetric { color: #E38D45; font-size: 18px; font-weight: 700; }
-        QLabel#homeBody { color: #6C8493; font-size: 12px; }
+        QLabel#homeBody { color: #617B8C; font-size: 12px; }
         QFrame#homeFoodTile { background: #F5FAFB; border: 1px solid #E4EFF0; border-radius: 11px; }
         QLabel#homeFoodName { color: #294F66; font-size: 11px; font-weight: 700; }
-        QPushButton#homeMoodChoice {
-            color: #31566D; background: #F0F7FA; text-align: left;
-            border: 1px solid #D6E7EF; border-radius: 9px;
-            padding: 7px 12px; font-size: 13px;
-        }
-        QPushButton#homeMoodChoice:hover { background: #E8F3F8; }
-        QPushButton#homeMoodChoice:checked {
-            color: #185D88; background: #DCEEF8;
-            border: 2px solid #62A9D3; font-weight: 700;
-        }
         QLabel#homeMoodHint { color: #C05239; font-size: 12px; }
-        QPushButton#homeMoodAction {
-            color: white; background: #358FCA; border: 0;
-            border-radius: 9px; font-size: 13px; font-weight: 700;
-        }
-        QPushButton#homeMoodAction:hover { background: #267DB6; }
-        QPushButton#homeLink { color: #3684BA; background: transparent; border: 0; text-align: left; padding: 4px 0; font-weight: 600; }
-        QPushButton#homeLink:hover { color: #174E83; }
-        QPushButton#homeAction { color: #FFFFFF; background: #3C9AD9; border: 0; border-radius: 12px; padding: 11px; font-weight: 700; }
-        QPushButton#homeAction:hover { background: #237EBB; }
     )"));
 
+    for (auto *link : findChildren<QPushButton *>("homeLink")) link->setProperty("link", true);
+    setStyleSheet(styleSheet() + QStringLiteral("QPushButton#homeMoodChoice { text-align:left; font-size:13px; padding-left:12px; padding-right:12px; }"));
     connect(m_rewards, &RewardSystem::changed, this, &HomeWidget::refresh);
     refresh();
 }
@@ -426,9 +413,8 @@ void HomeWidget::paintEvent(QPaintEvent* event)
 {
     QPainter painter(this);
     static const QPixmap background(QStringLiteral(":/home/morning-background.png"));
-    if (!background.isNull()) {
+    if (!background.isNull())
         painter.drawPixmap(rect(), background, background.rect());
-    }
     QWidget::paintEvent(event);
 }
 
@@ -455,8 +441,8 @@ void HomeWidget::refresh()
     } else {
         m_inventoryCount->setText(QStringLiteral("%1 项食材").arg(m_foods.size()));
         m_inventoryPreview->setText(m_foods.isEmpty()
-            ? QStringLiteral("冰箱还空着，先录入一些食材吧。")
-            : QStringLiteral("轻点冰箱门，看看食材放在哪里。"));
+            ? QStringLiteral("冰箱还是空的，录入食材后即可查看。")
+            : QStringLiteral("食材预览"));
         for (int i = 0; i < std::min(static_cast<int>(m_foods.size()), 4); ++i) {
             const HomeFoodItem& food = m_foods[i];
             auto* tile = new QFrame(this);

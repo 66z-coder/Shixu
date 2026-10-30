@@ -38,6 +38,8 @@ struct UserContext {
     // New V1 service requires preferences + snapshot; old recommend ignores them.
     std::optional<Shixu::Contracts::V1::RecommendationPreferences> preferences;
     Shixu::Contracts::V1::InventorySnapshot inventorySnapshot;
+    // Most recent verified meals first, limited to the last three days.
+    std::vector<int> recentRecipeIds;
 };
 
 struct Recommendation {

@@ -15,6 +15,9 @@ class QLabel;
 class QSpinBox;
 class QPushButton;
 class QVBoxLayout;
+class QStackedWidget;
+class QScrollArea;
+class RecipeDetailsWidget;
 
 struct RecommendationViewItem {
     int recipeId = 0;
@@ -48,6 +51,8 @@ class RecommendationWidget : public QWidget {
     void setRecommendationResult(const Shixu::Contracts::V1::RecommendationResult &result);
     void resetExcludedRecipeIds();
     void setDefaultInventoryPolicy(Shixu::Contracts::V1::InventoryPolicy policy);
+    RecipeDetailsWidget *recipeDetails() const;
+    void showRecipeDetails();
 
   signals:
     void moodSelected(Shixu::RecommendationEngine::Mood mood);
@@ -60,7 +65,12 @@ class RecommendationWidget : public QWidget {
   private:
     void sendV1Request();
     void updateQuickButtons();
+    void showStage(int stage);
+    void updateConditions();
+    void syncTimeChoices();
+    void restoreInitialConditions();
     QButtonGroup *m_moodButtons = nullptr;
+    QButtonGroup *m_timeButtons = nullptr;
     Shixu::Contracts::V1::Mood m_moodV1 = Shixu::Contracts::V1::Mood::NotSelected;
     Shixu::Contracts::V1::InventoryPolicy m_policy = Shixu::Contracts::V1::InventoryPolicy::PreferInventory;
     Shixu::Contracts::V1::Refinement m_refinement = Shixu::Contracts::V1::Refinement::None;
@@ -80,4 +90,14 @@ class RecommendationWidget : public QWidget {
     QLabel *m_emptyDescription = nullptr;
     QWidget *m_emptyState = nullptr;
     QVBoxLayout *m_resultsLayout = nullptr;
+    QStackedWidget *m_stages = nullptr;
+    RecipeDetailsWidget *m_recipeDetails = nullptr;
+    QVector<QLabel *> m_stageLabels;
+    QLabel *m_conditions = nullptr;
+    QPushButton *m_allowPurchase = nullptr;
+    QScrollArea *m_resultScroll = nullptr;
+    int m_resultScrollPosition = 0;
+    int m_initialMinutes = 30;
+    Shixu::Contracts::V1::InventoryPolicy m_initialPolicy =
+        Shixu::Contracts::V1::InventoryPolicy::PreferInventory;
 };

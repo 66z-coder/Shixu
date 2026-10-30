@@ -142,6 +142,7 @@ enum class Mood {
     WantLight = 4,
     TreatMyself = 5
 };
+// SmallPurchase remains readable for older profiles and behaves like PreferInventory.
 enum class InventoryPolicy { PreferInventory, OnlyInventory, SmallPurchase };
 enum class Refinement {
     None,

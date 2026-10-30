@@ -1,6 +1,7 @@
 #include "ui/RecommendationWidget.h"
 
 #include <QApplication>
+#include <QButtonGroup>
 #include <QLabel>
 #include <QPushButton>
 #include <QSpinBox>
@@ -54,10 +55,25 @@ int main(int argc, char *argv[]) {
     if (!check(neutral != nullptr, "Neutral mood option is missing")) {
         return 1;
     }
+    const auto initialTimeChoices = widget.findChildren<QPushButton *>("timeChoice");
+    initialTimeChoices[3]->click();
+    if (!check(limit->text() == QStringLiteral("请选择时间") && !limit->isHidden(),
+               "unselected custom time must prompt for time, not mood")) return 1;
+    limit->setValue(10);
+    limit->setValue(0);
+    if (!check(!limit->isHidden(), "clearing custom time must keep the input visible")) return 1;
     neutral->click();
+    if (!check(limit->isHidden(), "preset time must not also show a spinbox")) return 1;
+    const auto timeChoices = widget.findChildren<QPushButton *>("timeChoice");
+    QStringList timeLabels;
+    for (auto *button : timeChoices) timeLabels << button->text();
+    if (!check(timeLabels == QStringList{QStringLiteral("15 分钟"), QStringLiteral("30 分钟"),
+        QStringLiteral("45 分钟"), QStringLiteral("自定义")}, "time options must be 15/30/45/custom")) return 1;
+    timeChoices[3]->click();
+    if (!check(!limit->isHidden(), "custom choice reveals input")) return 1;
     limit->setValue(20);
     generate->click();
-    if (!check(requests == 3 && selected == Shixu::RecommendationEngine::Mood::Neutral && customLimit == 20,
+    if (!check(requests == 1 && selected == Shixu::RecommendationEngine::Mood::Neutral && customLimit == 20,
                "Selected mood and custom time cap must be passed to the integration layer")) {
         return 1;
     }
