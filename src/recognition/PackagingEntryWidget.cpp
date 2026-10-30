@@ -156,7 +156,8 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent), o
     recognitionDialog_ = new QDialog(this);
     recognitionDialog_->setObjectName("packagingDateDialog");
     recognitionDialog_->setWindowTitle("识别包装日期");
-    recognitionDialog_->setModal(true);
+    recognitionDialog_->setWindowFlag(Qt::WindowMinimizeButtonHint, true);
+    recognitionDialog_->setWindowModality(Qt::NonModal);
     recognitionDialog_->resize(560, 580);
     auto* dialogLayout = new QVBoxLayout(recognitionDialog_);
     auto* recognitionScroll = new QScrollArea(recognitionDialog_);
@@ -613,10 +614,18 @@ void PackagingEntryWidget::rotateImage(int degrees)
 
 void PackagingEntryWidget::openDateRecognition()
 {
-    if (submitting_ || ocr_.isBusy()) return;
+    if (submitting_) return;
+    if (recognitionActive_) {
+        recognitionDialog_->showNormal();
+        recognitionDialog_->raise();
+        recognitionDialog_->activateWindow();
+        return;
+    }
+    if (ocr_.isBusy()) return;
     recognitionActive_ = true;
     recognitionDialog_->findChild<QScrollArea*>("recognitionScroll")->verticalScrollBar()->setValue(0);
-    recognitionDialog_->open();
+    recognitionDialog_->show();
+    refresh();
 }
 
 void PackagingEntryWidget::parseText()
@@ -735,7 +744,10 @@ void PackagingEntryWidget::refresh()
     save_->setText(editingRow_ >= 0 ? "保存修改" : "暂存到待提交列表");
     directSave_->setVisible(editingRow_ < 0);
     directSave_->setEnabled(!submitting_ && editingRow_ < 0 && error.isEmpty() && confirmed_->isChecked() && !ocr_.isBusy());
-    openRecognition_->setEnabled(!submitting_ && !ocr_.isBusy());
+    openRecognition_->setEnabled(!submitting_ && (recognitionActive_ || !ocr_.isBusy()));
+    openRecognition_->setText(recognitionActive_
+        ? (ocr_.isBusy() ? QStringLiteral("查看识别进度") : QStringLiteral("返回日期识别"))
+        : QStringLiteral("识别包装日期"));
     save_->setEnabled(error.isEmpty() && confirmed_->isChecked() && !ocr_.isBusy());
     reset_->setEnabled(!ocr_.isBusy());
     edit_->setEnabled(list_->currentRow() >= 0 && !ocr_.isBusy());

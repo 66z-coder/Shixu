@@ -66,6 +66,8 @@ for raw in sys.stdin:
     temp.write_text(json.dumps({'image':str(image),'width':width,'height':height}),encoding='utf-8')
     os.replace(temp,capture)
     if mode=='slow': time.sleep(20)
+    if mode=='hold':
+        while Path(os.environ['SHIXU_TEST_MODE']).read_text()=='hold': time.sleep(0.01)
     def line(text,x,y,w,h): return {'text':text,'confidence':0.99,'box':[[x,y],[x+w,y],[x+w,y+h],[x,y+h]]}
     result={'success':True,'lines':[line('20260927',100,0,100,20),line('\u4fdd\u8d28\u671f\u81f3\uff1a',0,30,100,20),line('\uff1a20270326',100,30,100,20),line('\u751f\u4ea7\u65e5\u671f\uff1a',0,0,100,20)]}
     if mode=='fail': result={'success':False,'errorMessage':'fixture failure'}
@@ -128,11 +130,21 @@ for raw in sys.stdin:
         recognize->click(); waitUntil([&] { return status->text()=="fixture failure"; }, "engine failure delivered");
         check(!stop->isEnabled() && exit->isEnabled() && !apply->isEnabled(), "failure still permits exit");
         exit->click(); clean(); preserved();
-        open->click(); check(entry.loadImageFile(path), "image for rotation"); writeFile(control,"ok");
+        open->click(); check(entry.loadImageFile(path), "image for rotation"); writeFile(control,"hold");
         QFile::remove(capture); left->click();
         check(!QFile::exists(capture) && raw->toPlainText().isEmpty(), "rotation does not start OCR");
         recognize->click(); check(!left->isEnabled() && !right->isEnabled() && stop->isEnabled(), "rotation disabled during OCR");
+        waitUntil([&] { return QFile::exists(capture); }, "worker awaiting background interaction");
+        dialog->showMinimized(); app.processEvents();
+        check(dialog->isMinimized() && !dialog->isModal() && !QApplication::activeModalWidget(), "minimized recognition does not block main window");
+        check(service->isBusy() && open->isEnabled(), "main entry can reopen a running recognition job");
+        open->click(); app.processEvents();
+        check(!dialog->isMinimized() && service->isBusy() && raw->toPlainText().isEmpty(), "return to running job preserves it");
+        preserved(); dialog->showMinimized(); writeFile(control,"ok");
         waitUntil([&] { return apply->isEnabled(); }, "rotated result can be applied");
+        check(dialog->isMinimized() && !raw->toPlainText().isEmpty(), "OCR completes and retains its result while minimized");
+        open->click(); app.processEvents();
+        check(dialog->isVisible() && !dialog->isMinimized() && apply->isEnabled(), "restore keeps completed recognition ready to apply");
         waitUntil([&] {
             return scroll->viewport()->rect().contains(QRect(summary->mapTo(scroll->viewport(),QPoint()),summary->size()));
         }, "all date result lines visible after OCR");

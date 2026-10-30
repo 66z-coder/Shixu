@@ -158,6 +158,14 @@ int main(int argc, char **argv) {
         app.processEvents();
         auto* dateDialog = entry->findChild<QDialog*>("packagingDateDialog");
         check(dateDialog->isVisible(), "recognition dialog can open in main window");
+        dateDialog->showMinimized(); app.processEvents();
+        check(!dateDialog->isModal() && !QApplication::activeModalWidget(), "background recognition leaves main window available");
+        window.showPage(MainWindow::Page::Inventory); app.processEvents();
+        check(window.findChild<QStackedWidget*>("pageStack")->currentWidget()!=entry && window.isEnabled(),
+              "inventory remains accessible while recognition is minimized");
+        window.showPage(MainWindow::Page::FoodEntry);
+        entry->findChild<QPushButton*>("openDateRecognition")->click(); app.processEvents();
+        check(dateDialog->isVisible() && !dateDialog->isMinimized(), "entry restores existing recognition window");
         auto* recognitionScroll = dateDialog->findChild<QScrollArea*>("recognitionScroll");
         for (QSize dialogSize : {QSize(560,580), QSize(440,500)}) {
             dateDialog->resize(dialogSize); app.processEvents();
