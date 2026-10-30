@@ -31,7 +31,8 @@ class RuntimeLoaderTest(unittest.TestCase):
                     (root/name).parent.mkdir(parents=True, exist_ok=True)
                     archive.writestr(name, text)
                     code = compile(text, 'old/build/location/'+name, 'exec')
-                    archive.writestr(name+'c', importlib.util.MAGIC_NUMBER + b'\0'*12 + marshal.dumps(code))
+                    if name != 'packed_namespace/child.py':
+                        archive.writestr(name+'c', importlib.util.MAGIC_NUMBER + b'\0'*12 + marshal.dumps(code))
             (root/'packed_fixture/value.txt').write_text('asset content')
             finder = loader_module.PackedFinder(loader_module.ARCHIVE)
             sys.meta_path.insert(0, finder)

@@ -10,7 +10,7 @@
 # 用已验证运行包里的 Python 3.12 生成精简副本，原始运行包不变：
 & <原始运行包>/runtime/python/python.exe tools/slim_ocr_runtime.py --source <原始运行包> --output <新的精简目录>
 # 检查精简目录中的实际离线 OCR 后打包；PATH 包含匹配的 MinGW bin：
-python tools/package_windows.py --build build-final-release --qt D:/QT/6.11.2/mingw_64 --runtime-source <新的精简目录> --output <空的交付目录> --version 20261030-final-r3
+python tools/package_windows.py --build build-final-release --qt D:/QT/6.11.2/mingw_64 --runtime-source <新的精简目录> --output <空的交付目录> --version 20261030-ocr-fast
 ```
 
 脚本使用白名单打包程序、Qt 依赖、资源许可证和 OCR 文件；不会复制工作目录下的库存、做饭记录、个人资料、营养目标或头像。重复运行使用新的输出目录，避免覆盖已交付文件。
@@ -18,6 +18,8 @@ python tools/package_windows.py --build build-final-release --qt D:/QT/6.11.2/mi
 精简工具只面向锁定版本的 Python 3.12 / PaddleOCR 环境。移除测试、开发头文件、pip、视频解码器及当前离线照片识别不用的云端/训练模块；保留模型、原生库、图像读写、许可证和运行数据。标准库合并为 `python312.zip`；依赖源码及预编译字节码合并为 `packages.zip`，由 `ocr/runtime_loader.py` 保持逻辑路径、源码检查及物理资源读取。不能把这个目录当作通用 Python 开发环境，也不能只更换个别依赖版本。清单保存在 `runtime/SLIM-MANIFEST.json`。打包包含必要的空包目录，确保解压后命名空间查找不变。
 
 OCR 适配脚本只由主程序包提供，扩展不再覆盖它，避免降级进程协议。
+
+预编译缓存只保留在标准库及 Paddle、PaddleX、PaddleOCR、NumPy、Pillow 核心包中，其余归档源码按需在内存编译，避免为很少使用的功能重复存储字节码。
 
 仅更新主程序、OCR 扩展没有变化时，可添加 `--skip-ocr-addon` 复用已交付扩展。
 

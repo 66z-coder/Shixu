@@ -37,6 +37,8 @@ class PackedLoader(importlib.abc.InspectLoader):
         return importlib.util.decode_source(self.archive.read(self.source))
 
     def get_code(self, fullname):
+        if self.source + 'c' not in self.archive.NameToInfo:
+            return compile(self.archive.read(self.source), self.path, 'exec', dont_inherit=True)
         bytecode = self.archive.read(self.source + 'c')
         if bytecode[:4] != importlib.util.MAGIC_NUMBER:
             raise ImportError('OCR runtime bytecode does not match its Python version')

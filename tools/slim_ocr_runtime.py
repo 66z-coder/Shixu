@@ -18,6 +18,9 @@ DEVELOPMENT_SUFFIXES = {'.pyc', '.pyo', '.pdb', '.pyi', '.lib', '.a', '.h', '.hp
 UNUSED_CLOUD_PACKAGES = {'baidubce', 'Crypto', 'hf_xet', 'httpcore2', 'httpx2'}
 UNUSED_MODELSCOPE_TASKS = {'models', 'pipelines', 'trainers', 'metrics', 'msdatasets',
                          'preprocessors', 'exporters'}
+# Retain startup caches for the image/inference path, without duplicating bytecode
+# for every optional dependency. All remaining sources can compile in memory.
+PRECOMPILED_PACKAGES = {'paddle', 'paddlex', 'paddleocr', 'numpy', 'PIL'}
 
 
 def excluded(rel):
@@ -58,9 +61,9 @@ def build(source, destination):
     site.mkdir(parents=True)
     removed, archived = [], []
     before_count = before_bytes = 0
-    def add_module(archive, path, name):
+    def add_module(archive, path, name, precompile=True):
         archive.write(path, name)
-        if path.suffix == '.py':
+        if path.suffix == '.py' and precompile:
             data = path.read_bytes()
             code = compile(data, name, 'exec', dont_inherit=True)
             stat = path.stat()
@@ -86,7 +89,7 @@ def build(source, destination):
                     # cv2 executes config.py by filesystem path; leave its bootstrap intact.
                     if inside.suffix == '.py' and inside.parts[0] not in {'cv2', '_distutils_hack', 'setuptools'}:
                         (site/inside).parent.mkdir(parents=True, exist_ok=True)
-                        add_module(packages, path, inside.as_posix())
+                        add_module(packages, path, inside.as_posix(), inside.parts[0] in PRECOMPILED_PACKAGES)
                         archived.append(rel.as_posix())
                         continue
                 elif rel.parts[:3] == ('runtime', 'python', 'Lib'):
@@ -105,7 +108,8 @@ def build(source, destination):
     all_files = [p for p in destination.rglob('*') if p.is_file()]
     manifest = {'source_files':before_count, 'source_bytes':before_bytes,
                 'files':len(all_files), 'bytes':sum(p.stat().st_size for p in all_files),
-                'packed_source_modules':len(archived), 'removed':removed, 'archived':archived}
+                'packed_source_modules':len(archived), 'precompiled_packages':sorted(PRECOMPILED_PACKAGES),
+                'removed':removed, 'archived':archived}
     (destination/'runtime/SLIM-MANIFEST.json').write_text(json.dumps(manifest,indent=2),encoding='utf-8')
     print(json.dumps({k:v for k,v in manifest.items() if k not in ('removed','archived')},indent=2))
 
