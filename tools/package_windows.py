@@ -25,6 +25,8 @@ def main():
     parser.add_argument("--runtime-source", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--version", required=True)
+    parser.add_argument("--skip-ocr-addon", action="store_true",
+                        help="Only rebuild the main package; reuse an existing compatible OCR add-on")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     output = args.output.resolve()
@@ -70,7 +72,8 @@ def main():
     (app / "VERSION.txt").write_text(f"{args.version}\nSource commit: {revision}\n", encoding="ascii")
     (app / "使用说明.txt").write_text(
         "食序 Windows 10/11 x64 便携版\n\n"
-        "1. 完整解压到较短路径（如 D:\\Shixu）后双击 Start-Shixu.cmd，不要在压缩软件里直接运行。\n"
+        "1. 完整解压到较短路径（如 D:\\Shixu）后双击 Shixu.exe，不要在压缩软件里直接运行。\n"
+        "   主程序启动及图片识别均不显示控制台；Start-Shixu.cmd 仅作为兼容启动入口，可能短暂闪现命令窗口。\n"
         "2. 主程序包含库存、手动录入、推荐、菜谱、营养目标与成长功能，无需安装开发环境。\n"
         "3. 图片识别需另下载离线 OCR 扩展，将 runtime、ocr 文件夹放到 Shixu.exe 同级。\n"
         "   如出现 VC++ DLL 缺失提示，可运行 runtime/vcredist 中的安装程序。\n"
@@ -83,6 +86,9 @@ def main():
         encoding="utf-8-sig")
     main_files = [(p, root_name + "/" + p.relative_to(app).as_posix()) for p in app.rglob("*") if p.is_file()]
     archive(output / (root_name + ".zip"), main_files)
+    if args.skip_ocr_addon:
+        print("Main package only: reuse the existing offline OCR add-on.", flush=True)
+        return
     addon_files = []
     for folder in ("runtime", "ocr/models"):
         for p in (args.runtime_source / folder).rglob("*"):

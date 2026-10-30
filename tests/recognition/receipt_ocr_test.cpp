@@ -36,6 +36,9 @@ int main(int argc, char** argv)
         QFile script(temporary.filePath("engine.py"));
         check(script.open(QIODevice::WriteOnly), "engine fixture");
         script.write("import sys,json,time,os\nfrom pathlib import Path\n"
+                     "if sys.platform=='win32':\n"
+                     "    import ctypes\n"
+                     "    assert not ctypes.windll.kernel32.GetConsoleWindow(), 'OCR must not attach a console'\n"
                      "mode=os.environ.get('OCR_TEST_MODE','ok')\n"
                      "if mode=='slow': time.sleep(30)\n"
                      "if mode=='crash': sys.exit(3)\n"

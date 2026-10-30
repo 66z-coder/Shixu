@@ -9,6 +9,9 @@
 #include <QJsonArray>
 #include <QProcessEnvironment>
 #include <cmath>
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
 
 namespace {
 ReceiptOcrResult failure(const QString& message)
@@ -28,6 +31,12 @@ QString setting(const char* name, const QString& fallback)
 ReceiptOcrService::ReceiptOcrService(QObject* parent, int timeoutMs)
     : QObject(parent), timeoutMs_(timeoutMs)
 {
+#ifdef Q_OS_WIN
+    // Run the console-based OCR engine silently while retaining its output pipes.
+    process_.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* args) {
+        args->flags |= CREATE_NO_WINDOW;
+    });
+#endif
     timer_.setSingleShot(true);
     connect(&timer_, &QTimer::timeout, this, [this] {
         timedOut_ = true;

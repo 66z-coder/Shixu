@@ -349,6 +349,8 @@ if(QT_FOUND AND BUILD_TESTING)
 endif()
 
 if(WIN32 AND TARGET Shixu)
+    # The distributed application is a GUI; keep console output for test tools only.
+    set_target_properties(Shixu PROPERTIES WIN32_EXECUTABLE TRUE)
     enable_language(RC)
     configure_file(resources/shixu.rc.in ${CMAKE_CURRENT_BINARY_DIR}/shixu.rc @ONLY)
     target_sources(Shixu PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/shixu.rc)

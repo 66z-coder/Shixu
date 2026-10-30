@@ -7,6 +7,6 @@
 - 今日营养汇总及独立保存的每日目标，个人资料与避开食材设置。
 - 蓝白界面、首页冰箱互动和本地离线包装图片识别。
 
-Windows 便携版分为小体积主程序包与可选 OCR 扩展包。解压主程序后运行 `Start-Shixu.cmd`；使用图片识别时，将扩展解压至 `Shixu.exe` 同级。
+Windows 便携版分为小体积主程序包与可选 OCR 扩展包。解压主程序后双击 `Shixu.exe`，无需打开控制台；使用图片识别时，将扩展解压至 `Shixu.exe` 同级。
 
 构建和分发步骤见 [Windows 发布说明](docs/windows-release.md)，开发环境 OCR 配置见 [本地 OCR](docs/local_ocr.md)。个人数据不会随分发包提供。
