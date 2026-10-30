@@ -35,24 +35,44 @@ int main(int argc, char** argv)
         imageFile.close();
         QFile script(temporary.filePath("engine.py"));
         check(script.open(QIODevice::WriteOnly), "engine fixture");
-        script.write("import sys,json,time,os\nfrom pathlib import Path\n"
-                     "if sys.platform=='win32':\n"
-                     "    import ctypes\n"
-                     "    assert not ctypes.windll.kernel32.GetConsoleWindow(), 'OCR must not attach a console'\n"
-                     "mode=os.environ.get('OCR_TEST_MODE','ok')\n"
-                     "if mode=='slow': time.sleep(30)\n"
-                     "if mode=='crash': sys.exit(3)\n"
-                     "out=sys.argv[sys.argv.index('--output')+1]\n"
-                     "Path(out).write_text(json.dumps({'success':True,'lines':[]}),encoding='utf-8')\n");
+        script.write(R"PY(import sys,json,time,os
+from pathlib import Path
+if sys.platform=='win32':
+    import ctypes
+    assert not ctypes.windll.kernel32.GetConsoleWindow(), 'OCR must not attach a console'
+count=0
+for line in sys.stdin:
+    request=json.loads(line)
+    mode=Path(request['image']).read_text()
+    count+=1
+    if mode=='slow': time.sleep(30)
+    if mode=='crash': sys.exit(3)
+    result={'success':True,'lines':[{'text':str(os.getpid())+':'+str(count),'confidence':1.0,'box':[[0,0],[1,0],[1,1],[0,1]]}]}
+    if mode=='failure': result={'success':False,'errorMessage':'invalid image'}
+    content=json.dumps(result)
+    if mode=='invalid': content='not JSON'
+    if mode=='large': content='x'*(9*1024*1024)
+    if mode!='missing': Path(request['output']).write_text(content,encoding='utf-8')
+    print('library stdout log',flush=True)
+    print('library stderr log',file=sys.stderr,flush=True)
+    print('SHIXU_OCR_DONE stale',flush=True)
+    message='SHIXU_OCR_DONE '+request['id']+'\n'
+    if mode=='wrong': message='SHIXU_OCR_DONE wrong\n'
+    sys.stdout.write(message[:8]); sys.stdout.flush()
+    time.sleep(0.01)
+    sys.stdout.write(message[8:]); sys.stdout.flush()
+)PY");
         script.close();
         qputenv("SHIXU_OCR_SCRIPT", script.fileName().toUtf8());
         if (qEnvironmentVariableIsEmpty("SHIXU_OCR_PYTHON")) {
             qputenv("SHIXU_OCR_PYTHON", QDir(QString::fromUtf8(SHIXU_PROJECT_DIR))
                 .filePath(".venv-ocr/Scripts/python.exe").toUtf8());
         }
-        auto run = [&](const char* mode, int timeout, bool cancel) {
-            qputenv("OCR_TEST_MODE", mode);
-            ReceiptOcrService service(nullptr, timeout);
+        auto run = [&](ReceiptOcrService& service, const char* mode, bool cancel = false) {
+            QFile imageFile(image);
+            check(imageFile.open(QIODevice::WriteOnly | QIODevice::Truncate), "image fixture mode");
+            imageFile.write(mode);
+            imageFile.close();
             QEventLoop loop;
             ReceiptOcrResult result;
             int completions = 0;
@@ -68,13 +88,28 @@ int main(int argc, char** argv)
             check(completions == 1 && !service.isBusy(), "single completion and idle state");
             return result;
         };
-        check(run("ok", 5000, false).success, "async success");
-        check(run("slow", 100, false).errorMessage.contains(QStringLiteral("超时")), "timeout");
-        check(run("slow", 5000, true).errorMessage.contains(QStringLiteral("取消")), "cancel");
-        check(!run("crash", 5000, false).success, "nonzero exit");
+        ReceiptOcrService service(nullptr, 4000);
+        const auto first = run(service, "ok");
+        const auto second = run(service, "ok");
+        check(first.success && second.success, "async success");
+        check(first.lines[0].text.section(':', 0, 0) == second.lines[0].text.section(':', 0, 0)
+              && second.lines[0].text.endsWith(":2"), "reuse worker between requests");
+        check(!run(service, "failure").success, "image failure");
+        check(run(service, "ok").success, "reuse after image failure");
+        check(!run(service, "invalid").success, "invalid result");
+        check(!run(service, "large").success, "bounded result file");
+        check(!run(service, "missing").success, "missing result file");
+        check(!run(service, "crash").success, "nonzero exit");
+        check(run(service, "ok").success, "restart after worker crash");
+        check(run(service, "slow", true).errorMessage.contains(QStringLiteral("取消")), "cancel");
+        check(run(service, "ok").success, "restart after cancel");
+        ReceiptOcrService quick(nullptr, 500);
+        check(run(quick, "slow").errorMessage.contains(QStringLiteral("超时")), "timeout");
+        check(run(quick, "ok").success, "restart after timeout");
+        check(run(quick, "wrong").errorMessage.contains(QStringLiteral("超时")), "reject stale request identifier");
         qputenv("SHIXU_OCR_PYTHON", temporary.filePath("missing.exe").toUtf8());
-        check(!run("ok", 5000, false).success, "missing environment");
-        std::cout << "PASS: OCR protocol, async success, duplicate request, timeout, cancel, failure\n";
+        check(!run(service, "ok").success, "missing environment");
+        std::cout << "PASS: OCR protocol, reusable worker, split messages, restart, timeout, cancel, failure\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';

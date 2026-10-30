@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QProcessEnvironment>
+#include <QSignalBlocker>
 #include <cmath>
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
@@ -38,6 +39,7 @@ ReceiptOcrService::ReceiptOcrService(QObject* parent, int timeoutMs)
     });
 #endif
     timer_.setSingleShot(true);
+    connect(&process_, &QProcess::started, this, &ReceiptOcrService::sendRequest);
     connect(&timer_, &QTimer::timeout, this, [this] {
         timedOut_ = true;
         process_.kill();
@@ -53,8 +55,9 @@ ReceiptOcrService::ReceiptOcrService(QObject* parent, int timeoutMs)
     });
     connect(&process_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, [this](int code, QProcess::ExitStatus status) {
-        if (!busy_) return;
+        const auto finishedRequest = requestId_;
         collectDiagnostics();
+        if (!busy_ || requestId_ != finishedRequest) return;
         if (cancelled_) {
             finish(failure(QStringLiteral("已取消识别")));
             return;
@@ -63,18 +66,10 @@ ReceiptOcrService::ReceiptOcrService(QObject* parent, int timeoutMs)
             finish(failure(QStringLiteral("识别超时，请重试或使用更清晰的包装图片")));
             return;
         }
-        QFile output(temporary_->filePath("result.json"));
-        if (status != QProcess::NormalExit || !output.open(QIODevice::ReadOnly)
-            || output.size() > 8 * 1024 * 1024) {
-            finish(failure(QStringLiteral("本地 OCR 未正常返回结果。%1")
-                .arg(QString::fromUtf8(diagnostics_).right(1500))));
-            return;
-        }
-        auto result = parseResult(output.readAll());
-        if (code != 0 && result.success) {
-            result = failure(QStringLiteral("本地 OCR 异常退出"));
-        }
-        finish(result);
+        Q_UNUSED(code);
+        Q_UNUSED(status);
+        finish(failure(QStringLiteral("本地 OCR 未正常返回结果，请重试。%1")
+            .arg(QString::fromUtf8(diagnostics_).right(1500))));
     });
 }
 
@@ -89,9 +84,36 @@ ReceiptOcrService::~ReceiptOcrService()
 
 void ReceiptOcrService::collectDiagnostics()
 {
-    diagnostics_ += process_.readAllStandardOutput();
+    const auto output = process_.readAllStandardOutput();
+    diagnostics_ += output;
     diagnostics_ += process_.readAllStandardError();
     diagnostics_ = diagnostics_.right(16000);
+    protocolBuffer_ += output;
+    int end;
+    while ((end = protocolBuffer_.indexOf('\n')) >= 0) {
+        const auto line = protocolBuffer_.left(end).trimmed();
+        protocolBuffer_.remove(0, end + 1);
+        if (!busy_ || cancelled_ || timedOut_ || line != "SHIXU_OCR_DONE " + requestId_)
+            continue;
+        QFile result(temporary_->filePath("result.json"));
+        if (!result.open(QIODevice::ReadOnly) || result.size() > 8 * 1024 * 1024) {
+            result.close();
+            finish(failure(QStringLiteral("无法读取本地 OCR 结果，请重试")));
+        } else {
+            const auto parsed = parseResult(result.readAll());
+            result.close();
+            finish(parsed);
+        }
+    }
+    if (protocolBuffer_.size() > 65536) protocolBuffer_ = protocolBuffer_.right(4096);
+}
+
+void ReceiptOcrService::sendRequest()
+{
+    if (busy_ && !cancelled_ && !timedOut_ && !pendingRequest_.isEmpty()) {
+        process_.write(pendingRequest_);
+        pendingRequest_.clear();
+    }
 }
 
 void ReceiptOcrService::start(const QString& imagePath)
@@ -113,6 +135,15 @@ void ReceiptOcrService::start(const QString& imagePath)
             : QStringLiteral("本地 OCR 环境未准备好，请按 docs/local_ocr.md 安装")));
         return;
     }
+    const QString key = python + '\n' + script + '\n' + models;
+    if (process_.state() != QProcess::NotRunning && workerKey_ != key) {
+        const QSignalBlocker blocker(&process_);
+        process_.kill();
+        if (!process_.waitForFinished(3000)) {
+            emit completed(failure(QStringLiteral("本地 OCR 正在退出，请稍后重试")));
+            return;
+        }
+    }
     temporary_ = std::make_unique<QTemporaryDir>();
     if (!temporary_->isValid()) {
         emit completed(failure(QStringLiteral("无法创建 OCR 临时结果目录")));
@@ -121,16 +152,29 @@ void ReceiptOcrService::start(const QString& imagePath)
     diagnostics_.clear();
     busy_ = true;
     cancelled_ = timedOut_ = false;
+    requestId_ = QByteArray::number(++nextRequestId_);
+    const QJsonObject request{{"id", QString::fromLatin1(requestId_)},
+                              {"image", QFileInfo(imagePath).absoluteFilePath()},
+                              {"output", temporary_->filePath("result.json")}};
+    pendingRequest_ = QJsonDocument(request).toJson(QJsonDocument::Compact) + '\n';
+    timer_.start(timeoutMs_);
+    if (process_.state() == QProcess::Running) {
+        sendRequest();
+        return;
+    }
+    protocolBuffer_.clear();
+    workerKey_ = key;
     auto environment = QProcessEnvironment::systemEnvironment();
+    environment.remove("PYTHONHOME");
+    environment.remove("PYTHONPATH");
+    environment.insert("PYTHONDONTWRITEBYTECODE", "1");
     environment.insert("PYTHONUTF8", "1");
     environment.insert("PYTHONIOENCODING", "utf-8");
     environment.insert("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True");
     environment.insert("HF_HUB_OFFLINE", "1");
     process_.setProcessEnvironment(environment);
     process_.setWorkingDirectory(root.absolutePath());
-    process_.start(python, {script, "--image", QFileInfo(imagePath).absoluteFilePath(),
-                           "--models", models, "--output", temporary_->filePath("result.json")});
-    timer_.start(timeoutMs_);
+    process_.start(python, {script, "--worker", "--models", models});
 }
 
 void ReceiptOcrService::cancel()
@@ -145,6 +189,8 @@ void ReceiptOcrService::finish(const ReceiptOcrResult& result)
 {
     timer_.stop();
     busy_ = false;
+    pendingRequest_.clear();
+    requestId_.clear();
     temporary_.reset();
     emit completed(result);
 }

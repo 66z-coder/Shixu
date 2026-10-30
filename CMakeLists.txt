@@ -92,6 +92,10 @@ if(QT_FOUND)
         endforeach()
         set_tests_properties(packaging_entry PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
 
+        # Explicit invocation only: requires the separately distributed OCR runtime/models.
+        add_executable(receipt_ocr_live_test tests/recognition/receipt_ocr_live_test.cpp)
+        target_link_libraries(receipt_ocr_live_test PRIVATE ShixuRecognition)
+
     endif()
 
     add_library(ShixuRecommendation STATIC src/recommendation/RecommendationEngine.cpp)

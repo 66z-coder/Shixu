@@ -21,6 +21,10 @@ ReceiptOcrService、ReceiptOcrResult、receipt_ocr.py 保留历史名称，实�
 ReceiptOcrResult 保存文字、置信度和坐标；PackagingDateParser 负责日期解析。
 Python 只做模型加载和推理，业务规则由 C++ 处理。
 
+识别服务首次请求时启动一个无控制台的 Python 工作进程，后续请求复用同一个 PaddleOCR 实例。原有模型、CPU 参数、EXIF 方向处理、文字/置信度/坐标输出不变。第一次仍需加载运行库和模型；同一程序内连续识别无需重复加载。关闭程序时结束工作进程；取消、超时或进程崩溃后，下次请求自动重新启动。损坏图片返回错误，不阻止下一张图片识别。
+
+工作进程通过标准输入逐行接收 JSON（`id`、`image`、`output`），原子写入每次独立的结果文件，并输出带请求 ID 的完成标记；普通日志不会作为识别结果解析。仍支持原有 `--image --models --output` 单次命令行用法。
+
 程序按编译配置查找项目目录，移动源码后需要重新配置 CMake。
 可用 SHIXU_OCR_PYTHON、SHIXU_OCR_SCRIPT、SHIXU_OCR_MODELS 指定绝对路径。
 分发程序不能只复制 exe，还需要 Qt、Python 环境及模型。
@@ -31,4 +35,7 @@ ctest --test-dir build --output-on-failure
 
 保留四项测试：名称单位标准化、本地 OCR 进程协议、包装日期解析、包装录入交互。
 receipt_ocr_test 使用临时模拟脚本覆盖进程成功、取消、超时等情况，不代表真实模型准确率。
+模拟进程测试需要 Python；未配置 `.venv-ocr` 时设置 `SHIXU_OCR_PYTHON` 为独立运行包的 `runtime/python/python.exe`。现在也覆盖连续复用、损坏结果、过大结果、分段输出、错误请求标记、崩溃/取消/超时后重新识别和 Windows 无控制台。
+
+精简运行包必须在实际解压后验证。`tests/recognition/test_runtime_loader.py` 检查归档模块的导入、源码查看、资源读取和命名空间；可选构建目标 `receipt_ocr_live_test` 接收一个 JSON 数组文件，各项为 `{"image":"绝对图片路径","expected":"旧版识别结果 JSON 路径"}`，逐项比较真实 Qt 调用后的文字、置信度和坐标。该测试不读写库存或个人数据。测试时将 `TEMP`、`TMP` 指向可写临时目录，并设置三个 OCR 路径环境变量。
 模型和第三方依赖不计入自行编写的代码行数。

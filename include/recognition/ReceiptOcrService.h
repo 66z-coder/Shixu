@@ -24,10 +24,16 @@ signals:
 private:
     void finish(const ReceiptOcrResult& result);
     void collectDiagnostics();
+    void sendRequest();
     QProcess process_;
     QTimer timer_;
     std::unique_ptr<QTemporaryDir> temporary_;
     QByteArray diagnostics_;
+    QByteArray protocolBuffer_;
+    QByteArray pendingRequest_;
+    QByteArray requestId_;
+    QString workerKey_;
+    quint64 nextRequestId_ = 0;
     bool busy_ = false;
     bool cancelled_ = false;
     bool timedOut_ = false;

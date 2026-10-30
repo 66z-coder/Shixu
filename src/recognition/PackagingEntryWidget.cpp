@@ -306,7 +306,7 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
         confirmed_->setChecked(false);
         choose_->setEnabled(false); recognize_->setEnabled(false); cancel_->setEnabled(true); parse_->setEnabled(false);
         raw_->setReadOnly(true);
-        status_->setText("正在本地识别包装文字……");
+        status_->setText("正在本地识别包装文字……首次需加载模型，后续图片会更快。");
         ocr_.start(imagePath_);
         refresh();
     });

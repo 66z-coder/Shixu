@@ -75,12 +75,14 @@ def main():
         "1. 完整解压到较短路径（如 D:\\Shixu）后双击 Shixu.exe，不要在压缩软件里直接运行。\n"
         "   主程序启动及图片识别均不显示控制台；Start-Shixu.cmd 仅作为兼容启动入口，可能短暂闪现命令窗口。\n"
         "2. 主程序包含库存、手动录入、推荐、菜谱、营养目标与成长功能，无需安装开发环境。\n"
-        "3. 图片识别需另下载离线 OCR 扩展，将 runtime、ocr 文件夹放到 Shixu.exe 同级。\n"
+        "3. 图片识别需另下载本版离线 OCR 扩展，将 runtime、ocr 文件夹放到 Shixu.exe 同级。\n"
         "   如出现 VC++ DLL 缺失提示，可运行 runtime/vcredist 中的安装程序。\n"
         "4. 图片仅在本机识别，请核对识别结果后入库。\n"
         "5. 第一次启动没有个人数据；数据自动保存到同级 data 文件夹。\n"
         "6. 更新前备份整个 data 文件夹。分享给别人请发送原始 ZIP，不附带自己的 data。\n"
-        "7. 适用于 Windows 10/11 64 位 x64 电脑；OCR 首次加载较慢。\n\n"
+        "7. 适用于 Windows 10/11 64 位 x64 电脑；首次识别需加载模型，后续识别复用模型。\n"
+        "8. 本版请解压到新文件夹，再安装配套扩展，勿混用旧版 runtime 或覆盖 ocr/receipt_ocr.py。\n"
+        "   需要保留旧数据时，退出旧程序后将原 data 文件夹复制到新程序同级。\n\n"
         f"版本：{args.version}\n源代码提交：{revision}\n"
         f"源代码：https://github.com/66z-coder/Shixu/tree/{revision}\n",
         encoding="utf-8-sig")
@@ -92,20 +94,28 @@ def main():
     addon_files = []
     for folder in ("runtime", "ocr/models"):
         for p in (args.runtime_source / folder).rglob("*"):
-            if not p.is_file():
-                continue
             rel = p.relative_to(args.runtime_source)
             if any(part in {"__pycache__", ".pytest_cache", "tests", "test"} for part in rel.parts):
+                continue
+            if p.is_dir():
+                # Packed Python namespace packages still need their physical empty paths.
+                if not any(p.iterdir()):
+                    addon_files.append((p, rel.as_posix() + "/"))
+                continue
+            if not p.is_file():
                 continue
             if p.suffix.lower() in {".pyc", ".pyo", ".pdb"} or "site-packages/paddle/include/" in rel.as_posix():
                 continue
             addon_files.append((p, rel.as_posix()))
     note = output / "OCR扩展安装说明.txt"
-    note.write_text("请先将主程序解压到较短路径（如 D:\\Shixu）。将本扩展中的 runtime、ocr 文件夹解压到 Shixu.exe 所在文件夹。\n"
-                    "完成后重开程序即可进行包装图片识别，无需联网下载模型。\n"
+    note.write_text("请先将配套新版主程序解压到新的较短路径（如 D:\\ShixuNew）。将本扩展中的 runtime、ocr 文件夹解压到 Shixu.exe 所在文件夹。\n"
+                    "请勿合并旧版 runtime，也不要用旧扩展覆盖新版 ocr/receipt_ocr.py。\n"
+                    "完成后双击 Shixu.exe 即可进行包装图片识别，无需联网下载模型。\n"
+                    "首次识别需要加载模型；同一次程序运行中，后续图片复用已加载模型。取消或超时后再次识别会重新加载。\n"
                     "若提示缺少 VC++ DLL，请运行 runtime/vcredist 下的微软运行库安装程序。\n"
                     "扩展不会修改个人 data 文件夹。\n", encoding="utf-8-sig")
-    addon_files += [(repo / "ocr/receipt_ocr.py", "ocr/receipt_ocr.py"), (note, note.name)]
+    # The adapter belongs to the main app: an add-on must never downgrade its protocol.
+    addon_files.append((note, note.name))
     archive(output / ("Shixu-Offline-OCR-" + args.version + ".zip"), addon_files)
 
 
