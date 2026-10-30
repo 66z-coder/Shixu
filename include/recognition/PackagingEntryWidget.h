@@ -1,5 +1,8 @@
 #pragma once
 #include <QWidget>
+#include <QImage>
+#include <QTemporaryDir>
+#include <memory>
 #include <vector>
 #include "model/FoodCandidate.h"
 #include "recognition/ReceiptOcrService.h"
@@ -34,6 +37,10 @@ private:
     void parseText();
     void openDateRecognition();
     void applyRecognizedDates();
+    void rotateImage(int degrees);
+    void clearRecognitionResult();
+    void resetRecognitionSession();
+    void refreshRecognitionControls();
     void refresh();
     void clearForm();
     void editSelected();
@@ -48,6 +55,13 @@ private:
     QPushButton *openRecognition_, *applyDates_, *directSave_;
     DateRecognitionResult recognizedDates_;
     bool recognitionActive_ = false;
+    bool recognitionPending_ = false;
+    bool stopRequested_ = false;
+    QImage originalImage_;
+    int rotationDegrees_ = 0;
+    QString ocrImagePath_;
+    std::unique_ptr<QTemporaryDir> recognitionImages_;
+    QPushButton *rotateLeft_, *rotateRight_;
     bool directSubmission_ = false;
     bool categoryManual_ = false;
     QSpinBox *period_, *storageDays_;

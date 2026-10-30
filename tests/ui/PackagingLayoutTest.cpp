@@ -158,6 +158,18 @@ int main(int argc, char **argv) {
         app.processEvents();
         auto* dateDialog = entry->findChild<QDialog*>("packagingDateDialog");
         check(dateDialog->isVisible(), "recognition dialog can open in main window");
+        auto* recognitionScroll = dateDialog->findChild<QScrollArea*>("recognitionScroll");
+        for (QSize dialogSize : {QSize(560,580), QSize(440,500)}) {
+            dateDialog->resize(dialogSize); app.processEvents();
+            check(dateDialog->size()==dialogSize && recognitionScroll->horizontalScrollBar()->maximum()==0,
+                  "recognition dialog fits small windows without horizontal scrolling");
+            for (const auto* control : {dateDialog->findChild<QPushButton*>("rotatePackageLeft"),
+                                        dateDialog->findChild<QPushButton*>("rotatePackageRight")}) {
+                const QRect rect(control->mapTo(recognitionScroll->widget(),QPoint()),control->size());
+                check(rect.left()>=0 && rect.right()<recognitionScroll->viewport()->width(), "rotation controls fit viewport width");
+            }
+        }
+        dateDialog->resize(560,580); app.processEvents();
         if (!output.isEmpty()) check(dateDialog->grab().save(output + "/packaging-date-dialog.png"), "capture date dialog");
         dateDialog->reject();
         entry->findChild<QLabel *>("entryStatus")

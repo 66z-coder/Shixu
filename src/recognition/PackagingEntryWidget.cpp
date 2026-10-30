@@ -32,6 +32,9 @@
 #include <QMimeData>
 #include <QFileInfo>
 #include <QUrl>
+#include <QSaveFile>
+#include <QScrollBar>
+#include <QTransform>
 
 namespace {
 // Paint the original image into the current preview area without imposing its width.
@@ -103,9 +106,10 @@ bool isCountUnit(const QString& unit)
 }
 
 
-PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
+PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent), ocr_(this)
 {
     Shixu::installWheelGuard();
+    ocr_.setObjectName("packagingOcrService");
     setWindowTitle("食序 - 添加食材");
     resize(1100, 800);
     setObjectName("packagingEntry");
@@ -197,7 +201,8 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     choose_ = new QPushButton("导入包装图片", this);
     choose_->setObjectName("choosePackageImage");
     recognize_ = new QPushButton("识别包装文字", this);
-    cancel_ = new QPushButton("取消识别", this);
+    cancel_ = new QPushButton("停止识别", this);
+    recognize_->setObjectName("recognizePackage"); cancel_->setObjectName("stopRecognition");
     recognize_->setEnabled(false);
     cancel_->setEnabled(false);
     layout->addWidget(choose_);
@@ -207,12 +212,22 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     preview_ = new PackagingPreview(this);
     preview_->setObjectName("packagePreview");
     layout->addWidget(preview_);
+    auto* rotations = new QHBoxLayout();
+    rotateLeft_ = new QPushButton("向左旋转 90°", this); rotateLeft_->setObjectName("rotatePackageLeft");
+    rotateRight_ = new QPushButton("向右旋转 90°", this); rotateRight_->setObjectName("rotatePackageRight");
+    rotateLeft_->setEnabled(false); rotateRight_->setEnabled(false);
+    rotations->addWidget(rotateLeft_); rotations->addWidget(rotateRight_);
+    layout->addLayout(rotations);
+    auto* rotateHint = new QLabel("文字侧着时，请先旋转到正常阅读方向，再点击识别。", this);
+    rotateHint->setWordWrap(true); rotateHint->setProperty("entryHint", true);
+    layout->addWidget(rotateHint);
     raw_ = new QPlainTextEdit(this);
     raw_->setObjectName("packageText");
     raw_->setPlaceholderText("例如：生产日期：2026-10-20\n保质期：30天\n或：有效期至：2026-11-19");
     raw_->setMaximumHeight(110);
     layout->addWidget(raw_);
     parse_ = new QPushButton("解析日期信息", this);
+    parse_->setObjectName("parsePackageDates");
     layout->addWidget(parse_);
     recognitionStatus_ = new QLabel("导入一张包装日期照片，或粘贴包装文字。", recognitionCard);
     recognitionStatus_->setObjectName("recognitionStatus");
@@ -222,8 +237,14 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     recognitionSummary_->setObjectName("recognizedDateSummary");
     recognitionSummary_->setWordWrap(true); recognitionSummary_->setTextFormat(Qt::PlainText);
     layout->addWidget(recognitionSummary_);
+    // Wrapped result text can increase the range after the first queued scroll.
+    connect(recognitionScroll->verticalScrollBar(), &QScrollBar::rangeChanged, this, [this, recognitionScroll](int, int maximum) {
+        if (recognitionActive_ && recognitionDialog_->isVisible() && !recognitionSummary_->text().isEmpty())
+            recognitionScroll->verticalScrollBar()->setValue(maximum);
+    });
     auto* dialogButtons = new QDialogButtonBox(QDialogButtonBox::Cancel, recognitionDialog_);
-    dialogButtons->button(QDialogButtonBox::Cancel)->setText("取消");
+    dialogButtons->button(QDialogButtonBox::Cancel)->setText("取消并返回");
+    dialogButtons->button(QDialogButtonBox::Cancel)->setObjectName("cancelDateRecognition");
     applyDates_ = dialogButtons->addButton("确认并填入日期", QDialogButtonBox::AcceptRole);
     applyDates_->setObjectName("applyRecognizedDates"); applyDates_->setEnabled(false);
     dialogLayout->addWidget(dialogButtons);
@@ -232,6 +253,7 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     connect(recognitionDialog_, &QDialog::finished, this, [this] {
         recognitionActive_ = false;
         if (ocr_.isBusy()) ocr_.cancel();
+        resetRecognitionSession();
         refresh();
     });
     status_ = new QLabel("请填写基本信息，再选择日期依据。", this);
@@ -362,24 +384,39 @@ PackagingEntryWidget::PackagingEntryWidget(QWidget* parent) : QWidget(parent)
     }
     connect(choose_, &QPushButton::clicked, this, &PackagingEntryWidget::chooseImage);
     connect(parse_, &QPushButton::clicked, this, &PackagingEntryWidget::parseText);
-    connect(cancel_, &QPushButton::clicked, &ocr_, &ReceiptOcrService::cancel);
+    connect(rotateLeft_, &QPushButton::clicked, this, [this] { rotateImage(-90); });
+    connect(rotateRight_, &QPushButton::clicked, this, [this] { rotateImage(90); });
+    connect(cancel_, &QPushButton::clicked, this, [this] {
+        stopRequested_ = true;
+        ocr_.cancel();
+    });
     connect(recognize_, &QPushButton::clicked, this, [this] {
-        recognitionActive_ = true; applyDates_->setEnabled(false);
-        choose_->setEnabled(false); recognize_->setEnabled(false); cancel_->setEnabled(true); parse_->setEnabled(false);
-        raw_->setReadOnly(true);
+        if (ocr_.isBusy() || ocrImagePath_.isEmpty()) return;
+        recognitionActive_ = true; recognitionPending_ = true; stopRequested_ = false;
+        clearRecognitionResult();
         recognitionStatus_->setText("正在本地识别包装文字……首次需加载模型，后续图片会更快。");
-        ocr_.start(imagePath_);
+        ocr_.start(ocrImagePath_);
+        refreshRecognitionControls();
         refresh();
     });
     connect(&ocr_, &ReceiptOcrService::completed, this, [this](const ReceiptOcrResult& result) {
-        choose_->setEnabled(true); recognize_->setEnabled(!imagePath_.isEmpty()); cancel_->setEnabled(false); parse_->setEnabled(true);
-        raw_->setReadOnly(false);
-        if (!recognitionActive_) { refresh(); return; }
-        if (!result.success) { recognitionStatus_->setText(result.errorMessage); refresh(); return; }
-        QStringList lines;
-        for (const auto& line : result.lines) lines << line.text;
-        raw_->setPlainText(lines.join('\n'));
-        parseText();
+        if (!recognitionPending_) return;
+        recognitionPending_ = false;
+        refreshRecognitionControls();
+        if (!recognitionActive_) {
+            recognitionImages_.reset();
+            refresh(); return;
+        }
+        if (stopRequested_) {
+            stopRequested_ = false;
+            recognitionStatus_->setText("已停止识别，可旋转图片或重新导入后重试。");
+        } else if (!result.success) {
+            recognitionStatus_->setText(result.errorMessage);
+        } else {
+            raw_->setPlainText(PackagingDateParser::textFromOcrLines(result.lines));
+            parseText();
+        }
+        refresh();
     });
     auto changed = [this] { confirmed_->setChecked(false); refresh(); };
     for (auto* edit : {name_, production_, expiry_}) connect(edit, &QLineEdit::textChanged, this, changed);
@@ -487,10 +524,12 @@ bool PackagingEntryWidget::loadImageFile(const QString& path)
     QImageReader reader(path); reader.setAutoTransform(true);
     const auto image = reader.read();
     if (image.isNull()) { recognitionStatus_->setText("图片无法读取，请重新选择；当前内容已保留。"); return false; }
-    imagePath_ = path;
+    imagePath_ = path; ocrImagePath_ = path;
+    originalImage_ = image; rotationDegrees_ = 0;
+    recognitionImages_.reset();
     static_cast<PackagingPreview*>(preview_)->showImage(image);
-    raw_->clear(); recognizedDates_ = {}; recognitionSummary_->clear(); applyDates_->setEnabled(false);
-    recognize_->setEnabled(true);
+    clearRecognitionResult();
+    refreshRecognitionControls();
     recognitionStatus_->setText(QStringLiteral("已导入：%1。请识别包装文字。").arg(QFileInfo(path).fileName()));
     refresh();
     return true;
@@ -520,10 +559,63 @@ bool PackagingEntryWidget::eventFilter(QObject* watched,QEvent* event)
     return QWidget::eventFilter(watched,event);
 }
 
+void PackagingEntryWidget::clearRecognitionResult()
+{
+    raw_->clear(); recognizedDates_ = {};
+    recognitionSummary_->clear(); applyDates_->setEnabled(false);
+}
+
+void PackagingEntryWidget::refreshRecognitionControls()
+{
+    const bool busy = ocr_.isBusy();
+    const bool image = !originalImage_.isNull();
+    choose_->setEnabled(!busy);
+    recognize_->setEnabled(!busy && image);
+    cancel_->setEnabled(busy);
+    rotateLeft_->setEnabled(!busy && image); rotateRight_->setEnabled(!busy && image);
+    parse_->setEnabled(!busy); raw_->setReadOnly(busy);
+}
+
+void PackagingEntryWidget::resetRecognitionSession()
+{
+    clearRecognitionResult();
+    imagePath_.clear(); ocrImagePath_.clear(); originalImage_ = {}; rotationDegrees_ = 0;
+    static_cast<PackagingPreview*>(preview_)->showImage(QImage());
+    recognitionStatus_->setText("导入一张包装日期照片，或粘贴包装文字。");
+    // Closing a dialog must not remove a PNG still being read by the worker.
+    if (!ocr_.isBusy()) recognitionImages_.reset();
+    recognitionDialog_->findChild<QScrollArea*>("recognitionScroll")->verticalScrollBar()->setValue(0);
+    refreshRecognitionControls();
+}
+
+void PackagingEntryWidget::rotateImage(int degrees)
+{
+    if (ocr_.isBusy() || submitting_ || originalImage_.isNull()) return;
+    const int angle = (rotationDegrees_ + degrees + 360) % 360;
+    const QImage image = angle == 0 ? originalImage_ : originalImage_.transformed(QTransform().rotate(angle));
+    QString path = imagePath_;
+    if (angle != 0) {
+        if (!recognitionImages_) recognitionImages_ = std::make_unique<QTemporaryDir>();
+        if (!recognitionImages_->isValid()) {
+            recognitionStatus_->setText("无法创建旋转图片的临时目录，请重试。"); return;
+        }
+        path = recognitionImages_->filePath("rotated.png");
+        QSaveFile file(path);
+        if (!file.open(QIODevice::WriteOnly) || !image.save(&file, "PNG") || !file.commit()) {
+            recognitionStatus_->setText("旋转图片保存失败，当前图片和结果已保留。"); return;
+        }
+    }
+    rotationDegrees_ = angle; ocrImagePath_ = path;
+    static_cast<PackagingPreview*>(preview_)->showImage(image);
+    clearRecognitionResult();
+    recognitionStatus_->setText("已旋转图片，请点击“识别包装文字”重新识别。");
+}
+
 void PackagingEntryWidget::openDateRecognition()
 {
     if (submitting_ || ocr_.isBusy()) return;
     recognitionActive_ = true;
+    recognitionDialog_->findChild<QScrollArea*>("recognitionScroll")->verticalScrollBar()->setValue(0);
     recognitionDialog_->open();
 }
 
@@ -542,8 +634,10 @@ void PackagingEntryWidget::parseText()
         .arg(result.expiryDate.isValid() ? result.expiryDate.toString(Qt::ISODate) : QStringLiteral("未识别"))
         : QStringLiteral("日期不明确，请修正包装文字后重新解析，或返回手动填写。"));
     QTimer::singleShot(0, this, [this] {
-        if (recognitionDialog_->isVisible())
-            recognitionDialog_->findChild<QScrollArea*>("recognitionScroll")->ensureWidgetVisible(recognitionSummary_);
+        if (recognitionDialog_->isVisible() && !recognitionSummary_->text().isEmpty()) {
+            auto* scroll = recognitionDialog_->findChild<QScrollArea*>("recognitionScroll");
+            scroll->verticalScrollBar()->setValue(scroll->verticalScrollBar()->maximum());
+        }
     });
 }
 
@@ -656,13 +750,12 @@ void PackagingEntryWidget::clearForm()
 {
     editingRow_ = -1;
     storageStart_ = QDate(); storageDays_->setValue(0);
-    raw_->clear(); name_->clear(); production_->clear(); expiry_->clear();
+    resetRecognitionSession(); name_->clear(); production_->clear(); expiry_->clear();
     categoryManual_ = false; category_->setCurrentText(QStringLiteral("其他"));
     period_->setValue(0); periodUnit_->setCurrentIndex(0); mode_->setCurrentIndex(0);
     unitWeight_->setValue(0); netContentUnit_->setCurrentIndex(0);
     unit_->setCurrentIndex(0); quantity_->setValue(1); confirmed_->setChecked(false);
-    imagePath_.clear(); static_cast<PackagingPreview*>(preview_)->showImage(QImage());
-    recognize_->setEnabled(false); list_->clearSelection(); list_->setCurrentRow(-1);
+    list_->clearSelection(); list_->setCurrentRow(-1);
     status_->setText("可直接手动录入下一件，或导入新的包装图片。");
     refresh();
 }
@@ -690,9 +783,10 @@ void PackagingEntryWidget::editSelected()
     imagePath_ = entry.imagePath;
     if (!imagePath_.isEmpty()) {
         QImageReader reader(imagePath_); reader.setAutoTransform(true);
-        static_cast<PackagingPreview*>(preview_)->showImage(reader.read());
+        originalImage_ = reader.read(); ocrImagePath_ = imagePath_; rotationDegrees_ = 0;
+        static_cast<PackagingPreview*>(preview_)->showImage(originalImage_);
     }
-    recognize_->setEnabled(!imagePath_.isEmpty());
+    refreshRecognitionControls();
     editingRow_ = row; confirmed_->setChecked(false);
     status_->setText("正在修改选中食材，核对后点击保存修改。");
     refresh();

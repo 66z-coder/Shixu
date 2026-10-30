@@ -73,7 +73,7 @@ int main(int argc, char **argv) {
         for (auto *button : entry.findChildren<QPushButton *>()) {
             if (button->text() == QStringLiteral("识别包装文字"))
                 recognize = button;
-            if (button->text() == QStringLiteral("取消识别"))
+            if (button->text() == QStringLiteral("停止识别"))
                 cancel = button;
         }
         check(recognize && cancel, "OCR controls");

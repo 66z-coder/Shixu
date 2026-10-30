@@ -81,7 +81,7 @@ if(QT_FOUND)
         target_link_libraries(recognition_test PRIVATE ShixuRecognition)
         add_test(NAME recognition_test COMMAND recognition_test)
         foreach(pair IN ITEMS "receipt_ocr_test|receipt_ocr_protocol" "packaging_date_test|packaging_date"
-                              "packaging_entry_test|packaging_entry")
+                              "packaging_entry_test|packaging_entry" "packaging_session_test|packaging_session")
             string(REPLACE "|" ";" parts "${pair}")
             list(GET parts 0 target_name)
             list(GET parts 1 test_name)
@@ -90,7 +90,7 @@ if(QT_FOUND)
             target_compile_definitions(${target_name} PRIVATE SHIXU_PROJECT_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
             add_test(NAME ${test_name} COMMAND ${target_name})
         endforeach()
-        set_tests_properties(packaging_entry PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+        set_tests_properties(packaging_entry packaging_session PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
 
         # Explicit invocation only: requires the separately distributed OCR runtime/models.
         add_executable(receipt_ocr_live_test tests/recognition/receipt_ocr_live_test.cpp)

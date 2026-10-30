@@ -1,9 +1,66 @@
 #include "recognition/PackagingDateParser.h"
 #include <QRegularExpression>
 #include <QSet>
+#include <algorithm>
+#include <cmath>
 
 namespace {
 const QString datePattern = "(?:[12]\\d{3}\\s*[-/.年]\\s*\\d{1,2}\\s*[-/.月]\\s*\\d{1,2}日?|[12]\\d{7})(?!\\d)";
+}
+
+QString PackagingDateParser::textFromOcrLines(const QVector<ReceiptOcrLine>& lines)
+{
+    struct Fragment { QString text; QRectF rect; };
+    QVector<Fragment> fragments;
+    QStringList original;
+    bool validGeometry = true;
+    for (const auto& line : lines) {
+        const QString text = line.text.normalized(QString::NormalizationForm_KC).trimmed();
+        if (text.isEmpty()) continue;
+        original << text;
+        const QRectF rect = line.box.boundingRect();
+        for (const auto& point : line.box)
+            if (!std::isfinite(point.x()) || !std::isfinite(point.y())) validGeometry = false;
+        if (line.box.size() < 4 || rect.width() <= 0 || rect.height() <= 0) validGeometry = false;
+        fragments.push_back({text, rect});
+    }
+    // Missing geometry cannot justify reordering fragments or assigning them to a row.
+    if (!validGeometry) return original.join('\n');
+    std::stable_sort(fragments.begin(), fragments.end(), [](const auto& a, const auto& b) {
+        return a.rect.center().y() < b.rect.center().y();
+    });
+    QVector<QVector<Fragment>> rows;
+    for (const auto& fragment : fragments) {
+        auto row = std::find_if(rows.begin(), rows.end(), [&](const auto& candidates) {
+            // Compare every member so a tall fragment cannot bridge two adjacent rows.
+            return std::all_of(candidates.begin(), candidates.end(), [&](const auto& other) {
+                return std::abs(fragment.rect.center().y() - other.rect.center().y())
+                    <= 0.4 * std::min(fragment.rect.height(), other.rect.height());
+            });
+        });
+        if (row == rows.end()) rows.push_back({fragment});
+        else row->push_back(fragment);
+    }
+    QStringList textRows;
+    for (auto& row : rows) {
+        std::stable_sort(row.begin(), row.end(), [](const auto& a, const auto& b) {
+            return a.rect.left() < b.rect.left();
+        });
+        QString text;
+        for (const auto& fragment : row) {
+            QString part = fragment.text;
+            // A label and its neighboring date can each include the same separator.
+            if (text.endsWith(':')) {
+                while (part.startsWith(':')) part = part.mid(1).trimmed();
+            }
+            if (!part.isEmpty()) {
+                if (!text.isEmpty()) text += ' ';
+                text += part;
+            }
+        }
+        textRows << text;
+    }
+    return textRows.join('\n');
 }
 
 QDate PackagingDateParser::parseDate(const QString& input)
