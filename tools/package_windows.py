@@ -70,7 +70,7 @@ def main():
     (app / "VERSION.txt").write_text(f"{args.version}\nSource commit: {revision}\n", encoding="ascii")
     (app / "使用说明.txt").write_text(
         "食序 Windows 10/11 x64 便携版\n\n"
-        "1. 完整解压后双击 Start-Shixu.cmd，不要在压缩软件里直接运行。\n"
+        "1. 完整解压到较短路径（如 D:\\Shixu）后双击 Start-Shixu.cmd，不要在压缩软件里直接运行。\n"
         "2. 主程序包含库存、手动录入、推荐、菜谱、营养目标与成长功能，无需安装开发环境。\n"
         "3. 图片识别需另下载离线 OCR 扩展，将 runtime、ocr 文件夹放到 Shixu.exe 同级。\n"
         "   如出现 VC++ DLL 缺失提示，可运行 runtime/vcredist 中的安装程序。\n"
@@ -95,7 +95,7 @@ def main():
                 continue
             addon_files.append((p, rel.as_posix()))
     note = output / "OCR扩展安装说明.txt"
-    note.write_text("请先解压主程序。将本扩展中的 runtime、ocr 文件夹解压到 Shixu.exe 所在文件夹。\n"
+    note.write_text("请先将主程序解压到较短路径（如 D:\\Shixu）。将本扩展中的 runtime、ocr 文件夹解压到 Shixu.exe 所在文件夹。\n"
                     "完成后重开程序即可进行包装图片识别，无需联网下载模型。\n"
                     "若提示缺少 VC++ DLL，请运行 runtime/vcredist 下的微软运行库安装程序。\n"
                     "扩展不会修改个人 data 文件夹。\n", encoding="utf-8-sig")

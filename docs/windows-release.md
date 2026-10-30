@@ -14,7 +14,7 @@ python tools/package_windows.py --build build-final-release --qt D:/QT/6.11.2/mi
 
 ## 使用
 
-1. 将主程序 ZIP 完整解压到可写文件夹，双击 `Start-Shixu.cmd`。
+1. 将主程序 ZIP 完整解压到可写的较短路径（例如 `D:\Shixu`），双击 `Start-Shixu.cmd`。OCR 依赖包含较深的子目录，避免放在多层嵌套目录中，以免触发 Windows 路径长度限制。
 2. 需要包装图片识别时，将扩展 ZIP 的 `runtime` 与 `ocr` 文件夹解压到 `Shixu.exe` 同级。无需联网加载模型。
 3. 若 OCR 提示缺少 VC++ DLL，可运行 `runtime/vcredist` 中的微软安装程序后重试。
 4. 主程序通过 `portable.flag` 将个人数据存到同级 `data` 文件夹。首次启动为空；分享时发送原始 ZIP，勿发送自己的 `data`。
