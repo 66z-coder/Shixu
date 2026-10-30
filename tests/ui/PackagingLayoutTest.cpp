@@ -120,7 +120,13 @@ int main(int argc, char **argv) {
             check(scroll->verticalScrollBar()->maximum() > 0, "long form must scroll");
             const QRect submitRect(submit->mapTo(entry, QPoint()), submit->size());
             check(entry->rect().contains(submitRect), "submit button must stay visible");
+            check(!entry->findChild<QDialog*>("packagingDateDialog")->isVisible(), "OCR is outside first screen");
+            for (auto* field : {static_cast<QWidget*>(entry->findChild<QLineEdit*>("foodName")),
+                                static_cast<QWidget*>(entry->findChild<QComboBox*>("foodCategory"))})
+                check(scroll->viewport()->rect().contains(QRect(field->mapTo(scroll->viewport(), QPoint()), field->size())),
+                      "name and category fully visible on first screen");
             for (auto *field : entry->findChildren<QComboBox *>()) {
+                if (!field->isVisible()) continue;
                 const QRect fieldRect(field->mapTo(scroll->widget(), QPoint()), field->size());
                 check(fieldRect.right() < scroll->viewport()->width(),
                       "form field must not be clipped horizontally");
@@ -137,6 +143,23 @@ int main(int argc, char **argv) {
                       "save form screenshot");
             }
         }
+        window.resize(1280, 800);
+        entry->findChild<QLineEdit*>("foodName")->setText(QStringLiteral("牛奶"));
+        entry->findChild<QComboBox*>("foodUnit")->setCurrentText(QStringLiteral("盒"));
+        entry->findChild<QDoubleSpinBox*>("foodQuantity")->setValue(2);
+        entry->findChild<QComboBox*>("netContentUnit")->setCurrentText("ml");
+        entry->findChild<QDoubleSpinBox*>("gramsPerUnit")->setValue(250);
+        entry->findChild<QComboBox*>("dateMode")->setCurrentIndex(1);
+        entry->findChild<QLineEdit*>("expiryDate")->setText("2027-01-01");
+        scroll->verticalScrollBar()->setValue(0);
+        app.processEvents();
+        if (!output.isEmpty()) check(window.grab().save(output + "/entry-volume-example.png"), "capture volume form");
+        entry->findChild<QPushButton*>("openDateRecognition")->click();
+        app.processEvents();
+        auto* dateDialog = entry->findChild<QDialog*>("packagingDateDialog");
+        check(dateDialog->isVisible(), "recognition dialog can open in main window");
+        if (!output.isEmpty()) check(dateDialog->grab().save(output + "/packaging-date-dialog.png"), "capture date dialog");
+        dateDialog->reject();
         entry->findChild<QLabel *>("entryStatus")
             ->setText(
                 QStringLiteral(

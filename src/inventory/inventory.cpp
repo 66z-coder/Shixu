@@ -14,7 +14,9 @@ namespace {
 bool prepareFood(FoodCandidate &food) {
     food.name = food.name.trimmed(); food.unit = food.unit.trimmed();
     if (food.name.isEmpty() || food.unit.isEmpty() || !std::isfinite(food.quantity) || food.quantity <= 0 ||
-        !std::isfinite(food.gramsPerUnit) || food.gramsPerUnit < 0) return false;
+        !std::isfinite(food.gramsPerUnit) || food.gramsPerUnit < 0 ||
+        !std::isfinite(food.netContentPerUnit) || food.netContentPerUnit < 0 ||
+        !QStringList{"g", "kg", "ml", "L"}.contains(food.netContentUnit)) return false;
     const QString unit = food.unit.normalized(QString::NormalizationForm_KC).toLower();
     double factor = 0;
     if (unit == "g" || unit == "克") factor = 1;
@@ -22,6 +24,15 @@ bool prepareFood(FoodCandidate &food) {
     else if (unit == "mg" || unit == "毫克") factor = 0.001;
     else if (unit == "斤") factor = 500;
     const bool counted = QStringList{"个","盒","袋","瓶","包","罐","根","颗","枚","只","支","把","份"}.contains(unit);
+    if (counted) {
+        if (food.netContentPerUnit > 0) {
+            food.gramsPerUnit = food.netContentUnit == "g" ? food.netContentPerUnit
+                : food.netContentUnit == "kg" ? food.netContentPerUnit * 1000.0 : 0.0;
+        } else if (food.gramsPerUnit > 0) {
+            food.netContentPerUnit = food.gramsPerUnit; food.netContentUnit = "g";
+        }
+    } else { food.netContentPerUnit = 0; food.netContentUnit = "g"; }
+    if (!std::isfinite(food.quantity * food.netContentPerUnit)) return false;
     if (factor > 0) { food.gramsPerUnit = 0; food.totalWeightGrams = food.quantity * factor; }
     else if (counted) food.totalWeightGrams = food.quantity * food.gramsPerUnit;
     else { food.gramsPerUnit = 0; food.totalWeightGrams = 0; }
@@ -66,7 +77,7 @@ InventoryManager::InventoryManager()
     }
     while (query.next()) columns.insert(query.value(1).toString());
     query.finish();
-    for (const QString& column : {QStringLiteral("gramsPerUnit"), QStringLiteral("totalWeightGrams")}) {
+    for (const QString& column : {QStringLiteral("gramsPerUnit"), QStringLiteral("totalWeightGrams"), QStringLiteral("netContentPerUnit")}) {
         if (!columns.contains(column) &&
             !query.exec("ALTER TABLE foods ADD COLUMN " + column + " REAL NOT NULL DEFAULT 0")) {
             fail(query.lastError().text()); return;
@@ -74,6 +85,10 @@ InventoryManager::InventoryManager()
     }
     if (!columns.contains(QStringLiteral("category")) &&
         !query.exec("ALTER TABLE foods ADD COLUMN category TEXT NOT NULL DEFAULT ''")) {
+        fail(query.lastError().text()); return;
+    }
+    if (!columns.contains(QStringLiteral("netContentUnit")) &&
+        !query.exec("ALTER TABLE foods ADD COLUMN netContentUnit TEXT NOT NULL DEFAULT 'g'")) {
         fail(query.lastError().text()); return;
     }
     // Old records without a label stay editable under the neutral category.
@@ -185,8 +200,8 @@ bool InventoryManager::addFoods(const QList<FoodCandidate>& foods, QString* erro
         return fail(message);
     };
     QSqlQuery query(database);
-    if (!query.prepare("INSERT INTO foods (name,quantity,unit,expiryDate,gramsPerUnit,totalWeightGrams,category) "
-                       "VALUES (:name,:quantity,:unit,:expiry,:perUnit,:total,:category)"))
+    if (!query.prepare("INSERT INTO foods (name,quantity,unit,expiryDate,gramsPerUnit,totalWeightGrams,category,netContentPerUnit,netContentUnit) "
+                       "VALUES (:name,:quantity,:unit,:expiry,:perUnit,:total,:category,:netContent,:netUnit)"))
         return rollback("无法准备保存：" + query.lastError().text());
     for (const FoodCandidate& food : prepared) {
         query.bindValue(":name", food.name);
@@ -197,6 +212,8 @@ bool InventoryManager::addFoods(const QList<FoodCandidate>& foods, QString* erro
         query.bindValue(":perUnit", food.gramsPerUnit);
         query.bindValue(":total", food.totalWeightGrams);
         query.bindValue(":category", food.category);
+        query.bindValue(":netContent", food.netContentPerUnit);
+        query.bindValue(":netUnit", food.netContentUnit);
         if (!query.exec()) return rollback("保存失败：" + query.lastError().text());
         query.finish();
     }
@@ -237,11 +254,12 @@ bool InventoryManager::updateFood(const FoodCandidate &candidate, QString *error
         return fail(QStringLiteral("无法开始保存库存修改。"));
     auto rollback = [&](const QString &message) { database.rollback(); return fail(message); };
     QSqlQuery query(database);
-    query.prepare("UPDATE foods SET name=?,quantity=?,unit=?,expiryDate=?,gramsPerUnit=?,totalWeightGrams=?,category=? WHERE id=? AND quantity>0");
+    query.prepare("UPDATE foods SET name=?,quantity=?,unit=?,expiryDate=?,gramsPerUnit=?,totalWeightGrams=?,category=?,netContentPerUnit=?,netContentUnit=? WHERE id=? AND quantity>0");
     query.addBindValue(food.name); query.addBindValue(food.quantity); query.addBindValue(food.unit);
     query.addBindValue(food.expiryDate.isValid() ? QVariant(food.expiryDate.toString(Qt::ISODate)) : QVariant());
     query.addBindValue(food.gramsPerUnit); query.addBindValue(food.totalWeightGrams);
-    query.addBindValue(food.category); query.addBindValue(food.batchId);
+    query.addBindValue(food.category); query.addBindValue(food.netContentPerUnit);
+    query.addBindValue(food.netContentUnit); query.addBindValue(food.batchId);
     if (!query.exec()) return rollback(QStringLiteral("保存失败：") + query.lastError().text());
     if (query.numRowsAffected() != 1) return rollback(QStringLiteral("该库存批次已不存在，请刷新后重试。"));
     if (!query.exec("UPDATE shixu_inventory_meta SET revision=revision+1 WHERE id=1") || query.numRowsAffected() != 1)
@@ -262,7 +280,7 @@ QList<FoodCandidate> InventoryManager::getAllItems() const
     QSqlQuery query(database);
 
     if (!query.exec(
-        "SELECT name, quantity, unit, expiryDate, gramsPerUnit, totalWeightGrams, id, category "
+        "SELECT name, quantity, unit, expiryDate, gramsPerUnit, totalWeightGrams, id, category, netContentPerUnit, netContentUnit "
         "FROM foods WHERE quantity > 0 ORDER BY id"
 
     ))
@@ -285,8 +303,8 @@ QList<FoodCandidate> InventoryManager::getAllItems() const
 
         item.gramsPerUnit = query.value(4).toDouble();
         item.totalWeightGrams = query.value(5).toDouble();
-        item.batchId = query.value(6).toLongLong();
-        item.category = query.value(7).toString();
+        item.batchId = query.value(6).toLongLong(); item.category = query.value(7).toString();
+        item.netContentPerUnit = query.value(8).toDouble(); item.netContentUnit = query.value(9).toString();
         result.append(item);
     }
 
@@ -305,7 +323,7 @@ QList<FoodCandidate> InventoryManager::getExpiredItems(
 
     QSqlQuery query(database);
     query.prepare(
-        "SELECT name, quantity, unit, expiryDate, gramsPerUnit, totalWeightGrams "
+        "SELECT name, quantity, unit, expiryDate, gramsPerUnit, totalWeightGrams, id, category, netContentPerUnit, netContentUnit "
         "FROM foods WHERE quantity > 0 AND expiryDate IS NOT NULL "
         "AND expiryDate <> '' AND expiryDate < :currentDate "
         "ORDER BY id"
@@ -334,6 +352,8 @@ QList<FoodCandidate> InventoryManager::getExpiredItems(
         );
         item.gramsPerUnit = query.value(4).toDouble();
         item.totalWeightGrams = query.value(5).toDouble();
+        item.batchId = query.value(6).toLongLong(); item.category = query.value(7).toString();
+        item.netContentPerUnit = query.value(8).toDouble(); item.netContentUnit = query.value(9).toString();
         result.append(item);
     }
 
@@ -353,7 +373,7 @@ QList<FoodCandidate> InventoryManager::getExpiringItems(
 
     QSqlQuery query(database);
     query.prepare(
-        "SELECT name, quantity, unit, expiryDate, gramsPerUnit, totalWeightGrams "
+        "SELECT name, quantity, unit, expiryDate, gramsPerUnit, totalWeightGrams, id, category, netContentPerUnit, netContentUnit "
         "FROM foods WHERE quantity > 0 AND expiryDate IS NOT NULL "
         "AND expiryDate <> '' "
         "AND expiryDate >= :currentDate "
@@ -389,6 +409,8 @@ QList<FoodCandidate> InventoryManager::getExpiringItems(
         );
         item.gramsPerUnit = query.value(4).toDouble();
         item.totalWeightGrams = query.value(5).toDouble();
+        item.batchId = query.value(6).toLongLong(); item.category = query.value(7).toString();
+        item.netContentPerUnit = query.value(8).toDouble(); item.netContentUnit = query.value(9).toString();
         result.append(item);
     }
 
