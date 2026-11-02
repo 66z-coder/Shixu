@@ -110,6 +110,15 @@ Recipe dish(int id, const char* name, const char* category, int minutes,
 // ----------------------------------------------------------------------------
 // 30 道示例菜谱。用量为 1 份（约 1–2 人食）的常见家庭分量，单位克。
 // 盐、糖、酱油等家常调味品不列入 ingredients（不计入食材匹配）。
+// 人工标签按具体用量和做法审核，不按菜名、三行步骤或心情凑标签：
+// quick：预计不超过30分钟；easy：操作容错较高，不要求精细刀工、
+// 滑炒嫩肉、勾芡、炒糖色、煸炸火候或整鱼处理。
+// hearty：有足量肉/鱼/虾的主菜或丰富主料组合，普通蛋炒饭、蛋面不算。
+// special：有明确特色调味或工艺，如宫保、鱼香、麻婆、可乐焖、红烧肉。
+// appetizing：做法有酸辣等明确风味依据，不等同于营养丰富或人人爱吃。
+// light：清蒸、白灼、清汤或少油清炒；炖汤不自动算清淡。
+// high_protein / vegetable_rich 为待校验标签，以 dish 的筛选结果为准。
+// 这些是本项目的选餐分类，不是营养声称标准或个体口味结论。
 // ----------------------------------------------------------------------------
 std::vector<Recipe> loadBuiltinRecipes()
 {
@@ -126,42 +135,42 @@ std::vector<Recipe> loadBuiltinRecipes()
              {"土豆去皮切细丝，泡水去淀粉后沥干。",
               "热油下土豆丝大火快炒至断生。",
               "加青椒丝翻炒，调味出锅。"},
-             {"quick", "easy"}),
+             {"quick"}),
 
         dish(3, "宫保鸡丁", "荤菜", 30,
              {ing("鸡胸肉", 250), ing("花生", 50), ing("黄瓜", 100), ing("食用油", 20)},
              {"鸡胸肉切丁腌制，黄瓜切丁。",
               "鸡丁滑炒至变色盛出。",
               "回锅加调味汁、黄瓜丁、花生炒匀。"},
-             {"quick", "easy", "high_protein"}),
+             {"quick", "high_protein", "hearty", "special"}),
 
         dish(4, "鱼香肉丝", "荤菜", 25,
              {ing("猪里脊", 200), ing("木耳", 50), ing("胡萝卜", 80), ing("青椒", 50), ing("食用油", 20)},
              {"里脊切丝腌制，木耳、胡萝卜、青椒切丝。",
               "肉丝滑炒变色后盛出。",
               "下配菜与鱼香汁烧浓，回锅肉丝翻匀。"},
-             {"quick", "easy", "high_protein", "vegetable_rich"}),
+             {"quick", "high_protein", "vegetable_rich", "appetizing", "special"}),
 
         dish(5, "麻婆豆腐", "荤素", 20,
              {ing("豆腐", 400), ing("猪肉末", 100), ing("食用油", 20)},
              {"豆腐切小块，焯水去腥。",
               "热油炒散肉末，加豆瓣酱炒出红油。",
               "下豆腐轻推烧入味，勾芡出锅。"},
-             {"quick", "easy", "high_protein"}),
+             {"quick", "high_protein", "appetizing", "special"}),
 
         dish(6, "红烧肉", "荤菜", 75,
              {ing("五花肉", 500), ing("食用油", 10)},
              {"五花肉切块焯水。",
               "小火煸炒出油，加酱油和糖色炒匀。",
               "加水没过肉块，小火炖约 40 分钟收汁。"},
-             {"easy", "high_protein", "hearty", "special"}),
+             {"high_protein", "hearty", "special"}),
 
         dish(7, "可乐鸡翅", "荤菜", 40,
              {ing("鸡翅", 500), ing("可乐", 330), ing("食用油", 10)},
              {"鸡翅两面划口，焯水洗净。",
               "少油煎至两面金黄。",
               "倒入可乐没过鸡翅，中小火焖煮收汁。"},
-             {"easy", "high_protein"}),
+             {"easy", "high_protein", "hearty", "special"}),
 
         dish(8, "蒜蓉西兰花", "素菜", 15,
              {ing("西兰花", 300), ing("大蒜", 20), ing("食用油", 15)},
@@ -182,7 +191,7 @@ std::vector<Recipe> loadBuiltinRecipes()
              {"牛肉切片腌制，洋葱切丝。",
               "大火滑炒牛肉至变色盛出。",
               "炒软洋葱后回锅牛肉，调味翻匀。"},
-             {"quick", "easy", "high_protein", "vegetable_rich"}),
+             {"quick", "high_protein", "vegetable_rich"}),
 
         dish(11, "胡萝卜炒鸡蛋", "荤素", 15,
              {ing("胡萝卜", 200), ing("鸡蛋", 150), ing("食用油", 15)},
@@ -196,28 +205,28 @@ std::vector<Recipe> loadBuiltinRecipes()
              {"鸡蛋炒散盛出，胡萝卜切小丁。",
               "下胡萝卜丁、青豆炒熟。",
               "倒入米饭炒散，回锅鸡蛋调味炒匀。"},
-             {"quick", "easy", "high_protein", "hearty"}),
+             {"quick", "easy", "high_protein"}),
 
         dish(13, "番茄鸡蛋面", "主食", 22,
              {ing("面条", 120), ing("番茄", 150), ing("鸡蛋", 100), ing("食用油", 10)},
              {"番茄切块炒出汁，加水煮开。",
               "下面条煮熟。",
               "淋入蛋液成蛋花，调味即可。"},
-             {"quick", "easy", "noodle", "high_protein", "vegetable_rich", "hearty"}),
+             {"quick", "easy", "noodle", "high_protein", "vegetable_rich"}),
 
         dish(14, "青椒肉丝", "荤菜", 25,
              {ing("猪里脊", 200), ing("青椒", 150), ing("食用油", 15)},
              {"里脊切丝腌制，青椒切丝。",
               "肉丝滑炒变色盛出。",
               "炒青椒后回锅肉丝，调味翻匀。"},
-             {"quick", "easy", "high_protein", "vegetable_rich"}),
+             {"quick", "high_protein", "vegetable_rich"}),
 
         dish(15, "酸辣土豆丝", "素菜", 15,
              {ing("土豆", 300), ing("食用油", 15)},
              {"土豆切细丝泡水沥干。",
               "大火快炒至断生。",
               "加醋和少许辣椒调味出锅。"},
-             {"quick", "easy"}),
+             {"quick", "appetizing"}),
 
         dish(16, "香菇油菜", "素菜", 15,
              {ing("香菇", 150), ing("油菜", 250), ing("食用油", 10)},
@@ -238,7 +247,7 @@ std::vector<Recipe> loadBuiltinRecipes()
              {"排骨焯水洗净。",
               "加水炖约 50 分钟。",
               "下冬瓜块再炖 15 分钟，调味即可。"},
-             {"easy", "light", "high_protein", "vegetable_rich"}),
+             {"easy", "high_protein", "vegetable_rich", "hearty"}),
 
         dish(19, "紫菜蛋花汤", "汤类", 10,
              {ing("紫菜", 10), ing("鸡蛋", 100)},
@@ -287,28 +296,28 @@ std::vector<Recipe> loadBuiltinRecipes()
              {"茄子切滚刀块。",
               "多油煎软茄子盛出。",
               "爆香蒜末，回锅茄子加调味汁烧入味。"},
-             {"quick", "easy", "vegetable_rich"}),
+             {"quick", "vegetable_rich"}),
 
         dish(26, "干煸豆角", "荤素", 25,
              {ing("豆角", 300), ing("猪肉末", 50), ing("食用油", 20)},
              {"豆角掐段，中火煸至起皱熟透。",
               "下肉末炒散炒香。",
               "调味翻匀出锅。"},
-             {"quick", "easy", "vegetable_rich"}),
+             {"quick", "vegetable_rich"}),
 
         dish(27, "清蒸鲈鱼", "水产", 25,
              {ing("鲈鱼", 500), ing("姜", 10), ing("大葱", 10)},
              {"鲈鱼处理干净，两面划口，铺姜丝。",
               "水开后上锅蒸约 10 分钟。",
               "撒葱丝，淋热油和蒸鱼豉油。"},
-             {"quick", "easy", "light", "high_protein"}),
+             {"quick", "light", "high_protein", "hearty"}),
 
         dish(28, "白灼虾", "水产", 15,
              {ing("虾", 400), ing("姜", 10)},
              {"虾剪须洗净。",
               "水加姜片烧开，下虾煮至变红。",
               "捞出装盘，蘸料食用。"},
-             {"quick", "easy", "light", "high_protein"}),
+             {"quick", "easy", "light", "high_protein", "hearty"}),
 
         dish(29, "菠菜豆腐汤", "汤类", 15,
              {ing("菠菜", 200), ing("豆腐", 200)},

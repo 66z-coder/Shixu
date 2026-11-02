@@ -1,4 +1,5 @@
 #include "contracts/RecommendationContract.h"
+#include "contracts/ServiceFactories.h"
 #include "recipe/RecipeService.h"
 #include <QCoreApplication>
 #include <QFile>
@@ -374,12 +375,31 @@ void prioritiesAndRepetition() {
     check(service->recommend(c).cards.size() == 1, "Repetition never excludes the only dish");
 }
 void builtinTagAudit() {
-    const auto recipes = findRecipesByFoods({{"", "番茄", 300}});
+    // Read the same fully loaded catalogue as the UI, not only tomato matches.
+    const auto catalog = V::createRecipeService("");
+    const auto query = catalog->getAllRecipes();
+    check(query.outcome.status == V::OperationStatus::Succeeded && query.value.size() == 30,
+          "Audit all thirty loaded builtin recipes");
+    const auto &recipes = query.value;
+    const auto hasTag = [](const Recipe &r, const char *tag) {
+        return std::find(r.tags.begin(), r.tags.end(), tag) != r.tags.end();
+    };
+    const auto byId = [&](int id) -> const Recipe & {
+        const auto found = std::find_if(recipes.begin(), recipes.end(),
+                                       [id](const auto &r) { return r.id == id; });
+        check(found != recipes.end(), "Audit recipe exists");
+        return *found;
+    };
     auto soup = std::find_if(recipes.begin(), recipes.end(), [](const auto &r) { return r.name == "番茄蛋花汤"; });
     check(soup != recipes.end(), "Tomato egg soup exists");
     check(std::find(soup->tags.begin(), soup->tags.end(), V::Tags::Appetizing) == soup->tags.end(),
           "Tomato egg soup does not get an unsupported appetite tag");
     for (const auto &r : recipes) {
+        check(std::set<std::string>(r.tags.begin(), r.tags.end()).size() == r.tags.size(),
+              "No duplicate tags");
+        if (hasTag(r, V::Tags::Quick))
+            check(r.cookingTimeMinutes > 0 && r.cookingTimeMinutes <= 30,
+                  "Quick recipes fit the catalogue's thirty-minute convention");
         if (std::find(r.tags.begin(), r.tags.end(), V::Tags::HighProtein) == r.tags.end()) continue;
         double grams = 0, protein = 0;
         for (const auto &i : r.ingredients) {
@@ -388,6 +408,41 @@ void builtinTagAudit() {
         }
         check(grams > 0 && protein / grams >= 0.10, "Protein tag respects the estimated threshold");
     }
+    check(!hasTag(byId(12), V::Tags::Hearty) && !hasTag(byId(13), V::Tags::Hearty),
+          "Ordinary egg rice and noodles are not hearty meals");
+    check(!hasTag(byId(6), V::Tags::Easy) && !hasTag(byId(4), V::Tags::Easy),
+          "Condensed three-line recipes do not make sugar colouring or fine slicing easy");
+    check(!hasTag(byId(18), V::Tags::Light), "Rib soup is not light merely because it is soup");
+
+    Stock stock;
+    stock.enoughByDefault = true;
+    auto service = V::createRecommendationService(*catalog, stock);
+    auto c = context(V::Mood::TreatMyself, 75);
+    auto out = service->recommend(c);
+    validCards(out, 75);
+    check(!out.cards.empty() && hasTag(out.cards.front().recipe, V::Tags::Hearty) &&
+          hasTag(out.cards.front().recipe, V::Tags::Special),
+          "With equal stock, treating oneself selects a hearty special dish");
+    c = context(V::Mood::LowAppetite, 30);
+    out = service->recommend(c);
+    validCards(out, 30);
+    check(std::any_of(out.cards.begin(), out.cards.end(), [&](const auto &card) {
+        return hasTag(card.recipe, V::Tags::Appetizing);
+    }), "Appetite choices include a dish with actual flavour support");
+
+    // Keep the published defence examples honest while changing other recipes.
+    Recipes single;
+    single.data = {byId(1)};
+    service = V::createRecommendationService(single, stock);
+    c = context(V::Mood::Tired, 30);
+    out = service->recommend(c);
+    check(out.cards.size() == 1 && std::abs(out.cards[0].totalScore - 61.5) < 1e-8,
+          "Defence tired tomato-egg example remains 61.5");
+    c.preferences->mood = V::Mood::WantLight;
+    out = service->recommend(c);
+    check(out.cards.size() == 1 && std::abs(out.cards[0].moodMatchScore - 100.0 / 3) < 1e-8 &&
+          std::abs(out.cards[0].totalScore - 60.0) < 1e-8,
+          "Defence light tomato-egg example still matches one of three tags and scores 60");
 }
 void isolationAndFailures() {
     Recipes r;
